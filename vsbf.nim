@@ -37,7 +37,7 @@ type
     strs*: seq[string] ## List of strings that are indexed by string indexes
     stream*: Stream
     useNames: bool
-  VbsfError = object of ValueError
+  VsbfError = object of ValueError
 
 static:
   assert sizeof(SerialisationType) == 1 # Types are always 1
@@ -139,7 +139,7 @@ proc readLeb128*(stream: Stream, T: typedesc[SomeUnsignedInt], op: static Leb128
         stream.readUint8()
       else:
         if pos > theLen:
-          raise (ref VbsfError)(msg: "Attempting to read a too large integer")
+          raise (ref VsbfError)(msg: "Attempting to read a too large integer")
         let ind = pos
         inc pos
         byte chars[ind]
@@ -150,7 +150,7 @@ proc readLeb128*(stream: Stream, T: typedesc[SomeUnsignedInt], op: static Leb128
     shift += 7
 
   if shift > sizeof(T) * 8:
-    raise (ref VbsfError)(msg: "Got incorrect sized integer for given field type.")
+    raise (ref VsbfError)(msg: "Got incorrect sized integer for given field type.")
 
 proc readLeb128(stream: Stream, T: typedesc[SomeSignedInt], op: static Leb128Operation = Read): T =
   var shift = 0
@@ -178,7 +178,7 @@ proc readLeb128(stream: Stream, T: typedesc[SomeSignedInt], op: static Leb128Ope
     whileBody()
 
   if shift > sizeof(T) * 8:
-    raise (ref VbsfError)(msg: "Got incorrect sized integer for given field type.")
+    raise (ref VsbfError)(msg: "Got incorrect sized integer for given field type.")
 
   if (theByte and 0b0100_0000) == 0b0100_0000:
     result = result or (not(T(1)) shl shift)
@@ -210,7 +210,7 @@ proc getStr(dec: Decoder, ind: int): lent string =
 proc canConvertFrom(typ: SerialisationType, val: auto) =
   const expected = typeof(val).vsbfId()
   if typ != expected:
-    raise (ref VbsfError)(msg: "Expected: " & $expected & " but got " & $typ)
+    raise (ref VsbfError)(msg: "Expected: " & $expected & " but got " & $typ)
 
 proc cacheStr(encoder: var Encoder, str: sink string): int =
   withValue encoder.strs, str, val:
@@ -266,7 +266,7 @@ proc deserialise*[Idx, T](dec: var Decoder, arr: var array[Idx, T]) =
   canConvertFrom(typ, arr)
   let len = dec.stream.readLeb128(int)
   if len > arr.len:
-    raise (ref VbsfError)(msg: "Expected an array with a length equal to or less than '" & $arr.len & "', but got length of '" & $len & "'.")
+    raise (ref VsbfError)(msg: "Expected an array with a length equal to or less than '" & $arr.len & "', but got length of '" & $len & "'.")
   for i in 0..<len:
     dec.deserialise(arr[i])
 
@@ -306,7 +306,7 @@ proc deserialise*(dec: var Decoder, obj: var (object or tuple)) =
         (_, nameInd) = dec.peekTypeNamePair()
 
       if nameInd.isNone:
-        raise (ref VbsfError)(msg: "Expected name here")
+        raise (ref VsbfError)(msg: "Expected name here")
 
       for name, field in obj.fieldPairs:
         if name == dec.getStr(nameInd.unsafeGet):
@@ -314,12 +314,12 @@ proc deserialise*(dec: var Decoder, obj: var (object or tuple)) =
           inc parsed
 
       if parsed == start:
-        raise (ref VbsfError)(msg: "Cannot parse the given data to the type")
+        raise (ref VsbfError)(msg: "Cannot parse the given data to the type")
   else:
     for field in obj.fields:
       let (_, nameInd) = dec.peekTypeNamePair()
       if nameInd.isSome:
-        raise (ref VbsfError)(msg: "Has name but expected no name.")
+        raise (ref VsbfError)(msg: "Has name but expected no name.")
       deserialise(dec, field)
 
 
@@ -377,7 +377,7 @@ proc deserialiseRoot(dec: var Decoder, T: typedesc[object or tuple]): T =
   let (typ, nameInd) = dec.peekTypeNamePair()
   canConvertFrom(typ, result)
   if nameInd.isSome():
-    raise (ref VbsfError)(msg: "Expected a nameless root, but it was named: " & dec.getStr(nameInd.unsafeGet))
+    raise (ref VsbfError)(msg: "Expected a nameless root, but it was named: " & dec.getStr(nameInd.unsafeGet))
   dec.deserialise(result)
 
 proc init*(_: typedesc[Encoder], storeNames: bool): Encoder =
@@ -391,7 +391,7 @@ proc readHeaderAndExtractStrings(dec: var Decoder) =
   var ext: array[4, char]
   dec.stream.read(ext)
   if ext != "vsbf":
-    raise (ref VbsfError)(msg: "Not a VSBF stream, missing the header")
+    raise (ref VsbfError)(msg: "Not a VSBF stream, missing the header")
   discard dec.stream.readUint16 # No versioning yet
   for _ in 0..<dec.stream.readLeb128(int):
     let
