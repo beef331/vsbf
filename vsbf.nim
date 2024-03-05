@@ -2,7 +2,7 @@
 ## By using type information encoded we can catch decode errors and optionally invoke converters
 ## Say data was saved as a `Float32` but now is an `Int32` we can know this and do `int32(floatVal)`
 
-import std/[streams, tables, typetraits, options]
+import std/[streams, tables, typetraits, options, strutils]
 
 const
   version = "\1\0"
@@ -235,16 +235,12 @@ proc writeLeb128*(buffer: var openArray[byte], i: SomeSignedInt): int =
       return -1
 
 proc readLeb128*[T: SomeUnsignedInt](data: openArray[byte], val: var T): int =
-  var
-    shift = 0
-    pos = 0
+  var shift = 0
 
   while true:
-    if pos > data.len:
+    if result > data.len:
       raise (ref VsbfError)(msg: "Attempting to read a too large integer")
-    let ind = pos
-    inc pos
-    let theByte = data[pos]
+    let theByte = data[result]
     val = val or (T(0b0111_1111u8 and theByte) shl T(shift))
     inc result
 
@@ -259,13 +255,10 @@ proc readLeb128[T: SomeSignedInt](data: openArray[byte], val: var T): int =
   var
     shift = 0
     theByte: byte
-    pos = 0
 
   template whileBody =
-    let ind = pos
-    inc pos
-    theByte = data[ind]
-    val = val or T((0b0111_1111 and theByte) shl shift)
+    theByte = data[result]
+    val = val or T(T(0b0111_1111 and theByte) shl T(shift))
     shift += 7
     inc result
 
@@ -278,7 +271,7 @@ proc readLeb128[T: SomeSignedInt](data: openArray[byte], val: var T): int =
     raise (ref VsbfError)(msg: "Got incorrect sized integer for given field type.")
 
   if (theByte and 0b0100_0000) == 0b0100_0000:
-    val = val or (not(T(1)) shl shift)
+    val = val or (not(T(1)) shl T(shift))
 
 proc leb128(i: SomeInteger): (array[10, byte], int) =
   var data: array[10, byte]
@@ -308,8 +301,10 @@ proc peekTypeNamePair*(dec: var Decoder): tuple[typ: SerialisationType, nameInd:
 
   if hasName:
     var val = 0
-    let read = dec.data.toOpenArray(1).readLeb128(val)
-    result.nameInd = some(read)
+    if dec.data.toOpenArray(1).readLeb128(val) > 0:
+      result.nameInd = some(val)
+    else:
+      raise (ref VsbfError)(msg: "No name following a declaration.")
 
 proc getStr(dec: Decoder, ind: int): lent string =
   dec.strs[ind]
@@ -317,7 +312,7 @@ proc getStr(dec: Decoder, ind: int): lent string =
 proc canConvertFrom(typ: SerialisationType, val: auto) =
   const expected = typeof(val).vsbfId()
   if typ != expected:
-    raise (ref VsbfError)(msg: "Expected: " & $expected.ord & " but got " & $typ.ord)
+    raise (ref VsbfError)(msg: "Expected: 0x" & expected.byte.toHex() & " but got 0x" & typ.byte.toHex())
 
 proc cacheStr(encoder: var Encoder, str: sink string): int =
   withValue encoder.strs, str, val:
@@ -344,7 +339,7 @@ proc serialise*(encoder: var Encoder, i: SomeInteger, name: string) =
 proc deserialise*(dec: var Decoder, i: var SomeInteger) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, i)
-  dec.pos += dec.stream.readLeb128(i)
+  dec.pos += dec.data.readLeb128(i)
 
 proc serialise*(encoder: var Encoder, f: SomeFloat, name: string) =
   serialiseTypeInfo(encoder, f, name)
@@ -353,7 +348,7 @@ proc serialise*(encoder: var Encoder, f: SomeFloat, name: string) =
 proc deserialise*(dec: var Decoder, f: var SomeFloat) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, f)
-  dec.stream.read(f)
+  dec.data.read(f)
 
 proc serialise*(encoder: var Encoder, str: sink string, name: string) =
   serialiseTypeInfo(encoder, str, name)
@@ -364,7 +359,8 @@ proc deserialise*(dec: var Decoder, str: var string) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, str)
   var ind = 0
-  dec.pos += dec.stream.readLeb128(ind)
+  dec.pos += dec.data.readLeb128(ind)
+
   str = dec.getStr(ind)
 
 proc serialise*[Idx, T](encoder: var Encoder, arr: sink array[Idx, T], name: string) =
@@ -378,7 +374,7 @@ proc deserialise*[Idx, T](dec: var Decoder, arr: var array[Idx, T]) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, arr)
   var len = 0
-  dec.pos += dec.stream.readLeb128(len)
+  dec.pos += dec.data.readLeb128(len)
   if len > arr.len:
     raise (ref VsbfError)(msg: "Expected an array with a length equal to or less than '" & $arr.len & "', but got length of '" & $len & "'.")
   for i in 0..<len:
@@ -390,12 +386,13 @@ proc serialise*[T](encoder: var Encoder, arr: sink seq[T], name: string) =
   encoder.writeToData data.toOpenArray(0, len - 1)
   for val in arr.mitems:
     encoder.serialise(val, "")
+  wasMoved(arr)
 
 proc deserialise*[T](dec: var Decoder, arr: var seq[T]) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, arr)
   var len = 0
-  dec.pos += dec.stream.readLeb128(len)
+  dec.pos += dec.data.readLeb128(len)
   arr = newSeq[T](len)
   for i in 0..<len:
     dec.deserialise(arr[i])
@@ -448,7 +445,8 @@ proc serialise*(encoder: var Encoder, data: sink(ref), name: string) =
 proc deserialise*(dec: var Decoder, data: var ref) =
   let (typ, nameInd) = dec.typeNamePair()
   canConvertFrom(typ, data)
-  let isRefNil = dec.stream.readUint8() == 0
+  let isRefNil = dec.data[0]
+  dec.pos += 1
   if not isRefNil:
     new data
   dec.deserialise(data[])
@@ -514,27 +512,31 @@ proc readHeaderAndExtractStrings(dec: var Decoder) =
   var ext = dec.read(array[4, char])
   if ext.isNone or ext.unsafeGet != "vsbf":
     raise (ref VsbfError)(msg: "Not a VSBF stream, missing the header")
+  dec.pos += 4
 
   let ver = dec.read(array[2, byte])
 
+  if ver.isNone:
+    raise (ref VsbfError)(msg: "Cannot read, missing version")
+
+  dec.pos += 2
+
   var len = 0
-  let read = dec.stream.readLeb128(len)
+  let read = dec.data.readLeb128(len)
   if read == 0:
     raise (ref VsbfError)(msg: "Not enough data.")
 
   dec.pos += read
-
   for _ in 0..<len:
     var len = 0
-    let read = dec.stream.readLeb128(len)
+    let read = dec.data.readLeb128(len)
     if read == 0:
       raise (ref VsbfError)(msg: "Not enough data.")
     dec.pos += read
-
     var str = newString(len)
-    for i, x in dec.data.toOpenArray(0, len):
+    for i, x in dec.data.toOpenArray(0, len - 1):
       str[i] = char(x)
-    dec.strs.add str
+    dec.strs.add ensureMove str
     dec.pos += len
 
 proc init*(_: typedesc[Decoder], useNames: bool, data: sink seq[byte]): Decoder[seq[byte]] =
@@ -565,10 +567,9 @@ proc save*(encoder: var Encoder, path: string) =
   defer: fs.close
   fs.write header
   let (data, len) = leb128 encoder.strs.len
-  fs.write data.toOpenArray(0, data.high)
+  fs.write data.toOpenArray(0, len - 1)
   fs.write encoder.stringBuffer
   fs.write encoder.data
-
 
 type
   MyObject = object
@@ -605,7 +606,9 @@ var
 var decoder = Decoder.init(true, theFile)
 assert decoder.deserialiseRoot(MyObject) == obj
 
-#[
-decoder = Decoder.init(false, openFileStream("/tmp/test1.vsbf", fmRead))
-assert decoder.deserialiseRoot(MyObject) == obj
-]#
+fileData = readFile("/tmp/test1.vsbf")
+var buffer: array[1024, byte]
+
+buffer[0..fileData.high] = (fileData.toOpenArrayByte(0, fileData.high))
+var oaDecoder = Decoder.init(false, buffer)
+assert oaDecoder.deserialiseRoot(MyObject) == obj
