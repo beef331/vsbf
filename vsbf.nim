@@ -25,17 +25,35 @@ type
     Option ## If the next byte is 0x1 you parse the internal otherwise you skip
     Reserved = 127 ## Highest number of builtin types, going past this will cause issues with how name tagging works.
 
-  Encoder* = object
+  SeqOrArr[T] = seq[T] or openarray[T]
+
+  UnsafeView[T] = object
+    data: ptr UncheckedArray[T]
+    len: int
+
+  Encoder*[DataType: SeqOrArr[byte]] = object
     strs: Table[string, int]
-    strsBuffer*: Stream ## The string section, contains an array of `(len: leb128, data: UncheckedArray[char])`
-    dataBuffer*: Stream ##
-      ## The data section, first value should be the 'entry' and is a `typeId` that determines how all the data is parsed.
-      ## In the future this may be enforced to be a `Struct` or custom type
+    when DataType is seq[byte]:
+      strsBuffer*: seq[byte] ## The string section, contains an array of `(len: leb128, data: UncheckedArray[char])`
+      dataBuffer*: seq[byte] ##
+        ## The data section, first value should be the 'entry' and is a `typeId` that determines how all the data is parsed.
+        ## In the future this may be enforced to be a `Struct` or custom type
+    else:
+      strsBuffer*: UnsafeView[byte] ## The string section, contains an array of `(len: leb128, data: UncheckedArray[char])`
+      strsPos*: int
+      dataBuffer*: UnsafeView[byte] ##
+        ## The data section, first value should be the 'entry' and is a `typeId` that determines how all the data is parsed.
+        ## In the future this may be enforced to be a `Struct` or custom type
+      dataPos*: int
     storeNames: bool ## Whether we set the first bit to high where applicable (struct fields)
 
-  Decoder* = object
+  Decoder*[DataType: SeqOrArr[byte]] = object
     strs*: seq[string] ## List of strings that are indexed by string indexes
-    stream*: Stream
+    when DataType is seq[byte]:
+      stream*: seq[byte]
+    else:
+      stream*: UnsafeView[byte]
+    pos*: int
     useNames: bool
   VsbfError = object of ValueError
 
@@ -43,23 +61,112 @@ static:
   assert sizeof(SerialisationType) == 1 # Types are always 1
   assert SerialisationType.high.ord <= 127
 
-proc `=destroy`(encoder: var Encoder) =
-  try:
-    encoder.strsBuffer.close()
-    encoder.dataBuffer.close()
-  except:
-    discard
-  `=destroy`(encoder.strs)
-  `=destroy`(encoder.strsBuffer)
-  `=destroy`(encoder.dataBuffer)
+proc write*(stream: Stream, oa: openArray[byte]) =
+  for x in oa:
+    stream.write(x)
 
-proc `=destroy`(decoder: var Decoder) =
-  try:
-    decoder.stream.close()
-  except:
-    discard
-  `=destroy`(decoder.strs)
-  `=destroy`(decoder.stream)
+proc toUnsafeView[T](oa: openArray[T]): UnsafeView[T] =
+  UnsafeView[T](data: cast[ptr UncheckedArray[T]](oa[0].addr), len: oa.len)
+
+template toOa[T](view: UnsafeView[T]): auto =
+  view.data.toOpenArray(0, view.len - 1)
+
+template toOpenArray[T](view: UnsafeView[T], low, high: int): auto =
+  view.data.toOpenArray(low, high)
+
+template toOpenArray[T](view: UnsafeView[T], low: int): auto =
+  view.data.toOpenArray(low, view.len - 1)
+
+template toOpenArray[T](oa: openArray[T], low: int): auto =
+  oa.toOpenArray(low, oa.len - 1)
+
+template offsetStrBuffer*(encoder: Encoder[openArray[byte]]): untyped =
+  encoder.strsBuffer.toOpenArray(encoder.strsPos)
+
+template offsetDataBuffer*(encoder: Encoder[openArray[byte]]): untyped =
+  encoder.dataBuffer.toOpenArray(encoder.dataPos)
+
+template offsetStream*(decoder: Decoder[openArray[byte]]): untyped =
+  decoder.stream.toOpenArray(decoder.pos)
+
+template data*[T](encoder: Encoder[T]): untyped =
+  when T is seq:
+    encoder.databuffer.toOpenArray(0, encoder.dataBuffer.high)
+  else:
+    encoder.dataBuffer.toOa.toOpenArray(0, encoder.dataPos - 1)
+
+template stringBuffer*[T](encoder: Encoder[T]): untyped =
+  when T is seq:
+    encoder.strsBuffer.toOpenArray(0, encoder.strsBuffer.high)
+  else:
+    encoder.strsBuffer.toOa.toOpenArray(0, encoder.strsPos - 1)
+
+template data*[T](decoder: Decoder[T]): untyped =
+  decoder.stream.toOpenArray(decoder.pos, decoder.stream.len - 1)
+
+proc write*(oa: var openArray[byte], toWrite: SomeInteger): int =
+  if oa.len > sizeof(toWrite):
+    result = sizeof(toWrite)
+    for offset in 0..<sizeof(toWrite):
+      oa[offset] = byte(toWrite shr (offset * 8) and 0xff)
+
+proc write*(sq: var seq[byte], toWrite: SomeInteger): int =
+  result = sizeof(toWrite)
+  for offset in 0..<sizeof(toWrite):
+    sq.add byte((toWrite shr (offset * 8)) and 0xff)
+
+proc writeToStr*[T](encoder: var Encoder[T], toWrite: SomeInteger) =
+  when T is seq:
+    discard encoder.strsBuffer.write(toWrite)
+  else:
+    encoder.strsPos += encoder.offsetStrBuffer().write toWrite
+
+proc read[T: SomeInteger](oa: openArray[byte], res: var T): bool =
+  if sizeof(T) < oa.len:
+    res = T(0)
+    for i in T(0)..<sizeof(T):
+      res = res or (T(oa[int i]) shl (i * 8))
+
+    true
+  else:
+    false
+
+proc read(frm: openArray[byte], to: var openArray[byte or char]): int =
+  if to.len > frm.len:
+    -1
+  else:
+    for i in 0..to.high:
+      to[i] = typeof(to[0])(frm[i])
+    to.len
+
+proc read[T](dec: var Decoder[T], data: typedesc): Option[data] =
+  var val = default data
+  if dec.data.read(val) > 0:
+    some(val)
+  else:
+    none(data)
+
+proc writeToData*[T](encoder: var Encoder[T], toWrite: SomeInteger) =
+  when T is seq:
+    discard encoder.dataBuffer.write(toWrite)
+  else:
+    encoder.dataPos += encoder.offsetDataBuffer().write toWrite
+
+proc writeToStr*[T](encoder: var Encoder[T], toWrite: openArray[byte]) =
+  when T is seq:
+    encoder.strsBuffer.add toWrite
+  else:
+    for i, x in toWrite:
+      encoder.offsetStrBuffer()[i] = x
+    encoder.strsPos += toWrite.len
+
+proc writeToData*[T](encoder: var Encoder[T], toWrite: openArray[byte]) =
+  when T is seq:
+    encoder.dataBuffer.add toWrite
+  else:
+    for i, x in toWrite:
+      encoder.offsetDataBuffer()[i] = x
+    encoder.dataPos += toWrite.len
 
 
 
@@ -89,19 +196,23 @@ proc decodeType*(data: byte): tuple[typ: SerialisationType, hasName: bool] =
   result.hasName = (0b1000_0000u8 and data) > 0 # Extract whether the lastbit is set
   result.typ = cast[SerialisationType](data and 0b0111_1111)
 
-proc writeLeb128*(stream: Stream, i: SomeUnsignedInt) =
+proc writeLeb128*(buffer: var openArray[byte], i: SomeUnsignedInt): int =
   var
     val = ord(i)
     ranOnce = false
+
   while val != 0 or not ranOnce:
     var data = byte(val and 0b0111_1111)
     val = val shr 7
     if val != 0:
       data = 0b1000_0000 or data
-    stream.write(data)
+    buffer[result] = data
     ranOnce = true
+    inc result
+    if result > buffer.len:
+      return -1
 
-proc writeLeb128*(stream: Stream, i: SomeSignedInt) =
+proc writeLeb128*(buffer: var openArray[byte], i: SomeSignedInt): int =
   const size = sizeof(i)
   let isNegative = i < 0
   var
@@ -118,32 +229,24 @@ proc writeLeb128*(stream: Stream, i: SomeSignedInt) =
       more = false
     else:
       data = 0b1000_0000 or data
-    stream.write(data)
+    buffer[result] = data
+    inc result
+    if result > buffer.len:
+      return -1
 
-type
-  Leb128Operation = enum
-    Read
-    Peek
-
-proc readLeb128*(stream: Stream, T: typedesc[SomeUnsignedInt], op: static Leb128Operation = Read): T =
-  var shift = 0
-  when op == Peek:
-    var
-      chars: array[10, char]
-      pos = 0
-    let theLen = stream.peekData(chars.addr, chars.len)
+proc readLeb128*[T: SomeUnsignedInt](data: openArray[byte], val: var T): int =
+  var
+    shift = 0
+    pos = 0
 
   while true:
-    let theByte =
-      when op == Read:
-        stream.readUint8()
-      else:
-        if pos > theLen:
-          raise (ref VsbfError)(msg: "Attempting to read a too large integer")
-        let ind = pos
-        inc pos
-        byte chars[ind]
-    result = result or (T(0b0111_1111u8 and theByte) shl T(shift))
+    if pos > data.len:
+      raise (ref VsbfError)(msg: "Attempting to read a too large integer")
+    let ind = pos
+    inc pos
+    let theByte = data[pos]
+    val = val or (T(0b0111_1111u8 and theByte) shl T(shift))
+    inc result
 
     if (0b1000_0000u8 and theByte) == 0:
       break
@@ -152,25 +255,19 @@ proc readLeb128*(stream: Stream, T: typedesc[SomeUnsignedInt], op: static Leb128
   if shift > sizeof(T) * 8:
     raise (ref VsbfError)(msg: "Got incorrect sized integer for given field type.")
 
-proc readLeb128(stream: Stream, T: typedesc[SomeSignedInt], op: static Leb128Operation = Read): T =
-  var shift = 0
-  var theByte: byte
-  when op == Peek:
-    var
-      chars: array[10, char]
-      pos = 0
-    discard stream.peekData(chars.addr, chars.len)
+proc readLeb128[T: SomeSignedInt](data: openArray[byte], val: var T): int =
+  var
+    shift = 0
+    theByte: byte
+    pos = 0
 
   template whileBody =
-    theByte =
-      when op == Read:
-        stream.readUint8()
-      else:
-        let ind = pos
-        inc pos
-        byte chars[ind]
-    result = result or T((0b0111_1111 and theByte) shl shift)
+    let ind = pos
+    inc pos
+    theByte = data[ind]
+    val = val or T((0b0111_1111 and theByte) shl shift)
     shift += 7
+    inc result
 
   whileBody()
 
@@ -181,28 +278,38 @@ proc readLeb128(stream: Stream, T: typedesc[SomeSignedInt], op: static Leb128Ope
     raise (ref VsbfError)(msg: "Got incorrect sized integer for given field type.")
 
   if (theByte and 0b0100_0000) == 0b0100_0000:
-    result = result or (not(T(1)) shl shift)
+    val = val or (not(T(1)) shl shift)
+
+proc leb128(i: SomeInteger): (array[10, byte], int) =
+  var data: array[10, byte]
+  let len = data.writeLeb128(i)
+  (data, len)
 
 proc typeNamePair*(dec: var Decoder): tuple[typ: SerialisationType, nameInd: options.Option[int]] =
   ## reads the type and name's string index if it has it
-  let encodedType = dec.stream.readUint8()
+  var encodedType = 0u8
+  if not dec.data.read(encodedType):
+    raise newException(VsbfError, "Failed to read type info")
+  dec.pos += 1
+
   var hasName: bool
   (result.typ, hasName) = encodedType.decodeType()
 
   if hasName:
-    result.nameInd = some(dec.stream.readLeb128(int))
+    var ind = 0
+    dec.pos += dec.data.readLeb128(ind)
+    result.nameInd = some(ind)
 
 proc peekTypeNamePair*(dec: var Decoder): tuple[typ: SerialisationType, nameInd: options.Option[int]] =
   ## peek the type and name's string index if it has it
-  let encodedType = dec.stream.peekUint8()
+  let encodedType = dec.data[0]
   var hasName: bool
   (result.typ, hasName) = encodedType.decodeType()
 
   if hasName:
-    let pos = dec.stream.getPosition()
-    dec.stream.setPosition(pos + 1)
-    result.nameInd = some(dec.stream.readLeb128(int, Peek))
-    dec.stream.setPosition(pos)
+    var val = 0
+    let read = dec.data.toOpenArray(1).readLeb128(val)
+    result.nameInd = some(read)
 
 proc getStr(dec: Decoder, ind: int): lent string =
   dec.strs[ind]
@@ -210,35 +317,38 @@ proc getStr(dec: Decoder, ind: int): lent string =
 proc canConvertFrom(typ: SerialisationType, val: auto) =
   const expected = typeof(val).vsbfId()
   if typ != expected:
-    raise (ref VsbfError)(msg: "Expected: " & $expected & " but got " & $typ)
+    raise (ref VsbfError)(msg: "Expected: " & $expected.ord & " but got " & $typ.ord)
 
 proc cacheStr(encoder: var Encoder, str: sink string): int =
   withValue encoder.strs, str, val:
     result = val[]
   do:
     result = encoder.strs.len
-    encoder.strsBuffer.writeLeb128 str.len
-    encoder.strsBuffer.write str
+    let (data, len) = leb128 str.len
+    encoder.writeToStr(data.toOpenArray(0, len - 1))
+    encoder.writeToStr(str.toOpenArrayByte(0, str.high))
     encoder.strs[str] = result
 
 proc serialiseTypeInfo[T](encoder: var Encoder, val: T, name: sink string) =
   ## Stores the typeID and name if it's required(0b1xxx_xxxx if there is a name)
-  encoder.dataBuffer.write T.vsbfId.encoded(encoder.storeNames and name.len > 0)
+  encoder.writeToData T.vsbfId.encoded(encoder.storeNames and name.len > 0)
   if encoder.storeNames and name.len > 0:
-    encoder.dataBuffer.writeLeb128 encoder.cacheStr(name)
+    let (data, len) = leb128 encoder.cacheStr(name)
+    encoder.writeToData data.toOpenArray(0, len - 1)
 
 proc serialise*(encoder: var Encoder, i: SomeInteger, name: string) =
   serialiseTypeInfo(encoder, i, name)
-  encoder.dataBuffer.writeLeb128 i
+  let (data, len) = leb128 i
+  encoder.writeToData data.toOpenArray(0, len - 1)
 
 proc deserialise*(dec: var Decoder, i: var SomeInteger) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, i)
-  i = dec.stream.readLeb128(SomeInteger)
+  dec.pos += dec.stream.readLeb128(i)
 
 proc serialise*(encoder: var Encoder, f: SomeFloat, name: string) =
   serialiseTypeInfo(encoder, f, name)
-  encoder.dataBuffer.write f
+  encoder.writeToData f
 
 proc deserialise*(dec: var Decoder, f: var SomeFloat) =
   let (typ, _) = dec.typeNamePair()
@@ -247,24 +357,28 @@ proc deserialise*(dec: var Decoder, f: var SomeFloat) =
 
 proc serialise*(encoder: var Encoder, str: sink string, name: string) =
   serialiseTypeInfo(encoder, str, name)
-  encoder.dataBuffer.writeLeb128 encoder.cacheStr(str)
+  let (data, len) = leb128 encoder.cacheStr(str)
+  encoder.writeToData data.toOpenArray(0, len - 1)
 
 proc deserialise*(dec: var Decoder, str: var string) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, str)
-  let ind = dec.stream.readLeb128(int)
+  var ind = 0
+  dec.pos += dec.stream.readLeb128(ind)
   str = dec.getStr(ind)
 
 proc serialise*[Idx, T](encoder: var Encoder, arr: sink array[Idx, T], name: string) =
   serialiseTypeInfo(encoder, arr, name)
-  encoder.dataBuffer.writeLeb128 arr.len
+  let (data, len) = leb128 arr.len
+  encoder.writeToData data.toOpenArray(0, len - 1)
   for val in arr.mitems:
     encoder.serialise(val, "")
 
 proc deserialise*[Idx, T](dec: var Decoder, arr: var array[Idx, T]) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, arr)
-  let len = dec.stream.readLeb128(int)
+  var len = 0
+  dec.pos += dec.stream.readLeb128(len)
   if len > arr.len:
     raise (ref VsbfError)(msg: "Expected an array with a length equal to or less than '" & $arr.len & "', but got length of '" & $len & "'.")
   for i in 0..<len:
@@ -272,14 +386,16 @@ proc deserialise*[Idx, T](dec: var Decoder, arr: var array[Idx, T]) =
 
 proc serialise*[T](encoder: var Encoder, arr: sink seq[T], name: string) =
   serialiseTypeInfo(encoder, arr, name)
-  encoder.dataBuffer.writeLeb128 arr.len
+  let (data, len) = leb128 arr.len
+  encoder.writeToData data.toOpenArray(0, len - 1)
   for val in arr.mitems:
     encoder.serialise(val, "")
 
 proc deserialise*[T](dec: var Decoder, arr: var seq[T]) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, arr)
-  let len = dec.stream.readLeb128(int)
+  var len = 0
+  dec.pos += dec.stream.readLeb128(len)
   arr = newSeq[T](len)
   for i in 0..<len:
     dec.deserialise(arr[i])
@@ -325,7 +441,7 @@ proc deserialise*(dec: var Decoder, obj: var (object or tuple)) =
 
 proc serialise*(encoder: var Encoder, data: sink(ref), name: string) =
   serialiseTypeInfo(encoder, data, name)
-  encoder.write data != nil
+  encoder.writeToData byte(data != nil)
   if data != nil:
     encoder.serialise(data[], "")
 
@@ -380,30 +496,66 @@ proc deserialiseRoot(dec: var Decoder, T: typedesc[object or tuple]): T =
     raise (ref VsbfError)(msg: "Expected a nameless root, but it was named: " & dec.getStr(nameInd.unsafeGet))
   dec.deserialise(result)
 
-proc init*(_: typedesc[Encoder], storeNames: bool): Encoder =
+proc init*(_: typedesc[Encoder], storeNames: bool, strsBuffer, dataBuffer: openArray[byte]): Encoder =
   Encoder(
-    strsBuffer: newStringStream(),
-    dataBuffer: newStringStream(),
+    strsBuffer: strsBuffer.toUnsafeView(),
+    dataBuffer: dataBuffer.toUnsafeView(),
+    storeNames: storeNames
+    )
+
+proc init*(_: typedesc[Encoder], storeNames: bool): Encoder[seq[byte]] =
+  Encoder[seq[byte]](
+    strsBuffer: newSeqOfCap[byte](256),
+    dataBuffer: newSeqOfCap[byte](256),
     storeNames: storeNames
     )
 
 proc readHeaderAndExtractStrings(dec: var Decoder) =
-  var ext: array[4, char]
-  dec.stream.read(ext)
-  if ext != "vsbf":
+  var ext = dec.read(array[4, char])
+  if ext.isNone or ext.unsafeGet != "vsbf":
     raise (ref VsbfError)(msg: "Not a VSBF stream, missing the header")
-  discard dec.stream.readUint16 # No versioning yet
-  for _ in 0..<dec.stream.readLeb128(int):
-    let
-      len = dec.stream.readLeb128(int)
-    dec.strs.add dec.stream.readStr(len)
 
-proc init*(_: typedesc[Decoder], useNames: bool, stream: sink Stream): Decoder =
-  result = Decoder(
-    stream: stream,
+  let ver = dec.read(array[2, byte])
+
+  var len = 0
+  let read = dec.stream.readLeb128(len)
+  if read == 0:
+    raise (ref VsbfError)(msg: "Not enough data.")
+
+  dec.pos += read
+
+  for _ in 0..<len:
+    var len = 0
+    let read = dec.stream.readLeb128(len)
+    if read == 0:
+      raise (ref VsbfError)(msg: "Not enough data.")
+    dec.pos += read
+
+    var str = newString(len)
+    for i, x in dec.data.toOpenArray(0, len):
+      str[i] = char(x)
+    dec.strs.add str
+    dec.pos += len
+
+proc init*(_: typedesc[Decoder], useNames: bool, data: sink seq[byte]): Decoder[seq[byte]] =
+  ## Heap allocated version, it manages it's own buffer you give it and reads from this.
+  ## Can recover the buffer using `close` after parsin
+  result = Decoder[seq[byte]](
+    stream: data,
     useNames: useNames)
   result.readHeaderAndExtractStrings()
   # We now should be sitting right on the root entry's typeId
+
+proc close*(decoder: sink Decoder[seq[byte]]): seq[byte] = ensureMove(decoder.stream)
+
+proc init*(_: typedesc[Decoder], useNames: bool, data: openArray[byte]): Decoder[openArray[byte]] =
+  ## Non heap allocating version of the decoder uses preallocated memory that must outlive the structure
+  result = Decoder[openArray[byte]](
+    stream: toUnsafeView data,
+    useNames: useNames)
+  result.readHeaderAndExtractStrings()
+  # We now should be sitting right on the root entry's typeId
+
 
 proc save*(encoder: var Encoder, path: string) =
   ## Writes the data to a file
@@ -412,14 +564,11 @@ proc save*(encoder: var Encoder, path: string) =
   let fs = newFileStream(path, fmWrite)
   defer: fs.close
   fs.write header
-  encoder.strsBuffer.setPosition(0)
-  encoder.dataBuffer.setPosition(0)
-  fs.writeLeb128 encoder.strs.len
-  fs.write encoder.strsBuffer.readAll()
-  fs.write encoder.dataBuffer.readAll()
+  let (data, len) = leb128 encoder.strs.len
+  fs.write data.toOpenArray(0, data.high)
+  fs.write encoder.stringBuffer
+  fs.write encoder.data
 
-
-var encoder = Encoder.init(true)
 
 type
   MyObject = object
@@ -442,15 +591,21 @@ let obj = MyObject(
   letters: {'a'..'z'},
   children: newSeq[MyObject](5))
 
+var encoder = Encoder.init(true)
 encoder.serialiseRoot(obj)
 encoder.save "/tmp/test.vsbf"
 encoder = Encoder.init(false)
 encoder.serialiseRoot(obj)
 encoder.save "/tmp/test1.vsbf"
 
+var
+  fileData = readFile("/tmp/test.vsbf")
+  theFile = @(fileData.toOpenArrayByte(0, fileData.high))
 
-var decoder = Decoder.init(true, openFileStream("/tmp/test.vsbf", fmRead))
+var decoder = Decoder.init(true, theFile)
 assert decoder.deserialiseRoot(MyObject) == obj
 
+#[
 decoder = Decoder.init(false, openFileStream("/tmp/test1.vsbf", fmRead))
 assert decoder.deserialiseRoot(MyObject) == obj
+]#
