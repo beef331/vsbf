@@ -3,7 +3,7 @@
 ## Say data was saved as a `Float32` but now is an `Int32` we can know this and do `int32(floatVal)`
 
 import vsbf/[shared, decoders, encoders]
-export skipSerialisation, decoders, encoders
+export skipSerialization, decoders, encoders
 
 when isMainModule:
   import vsbf/dumper
@@ -17,7 +17,7 @@ when isMainModule:
       children: seq[MyObject]
       pets: seq[string]
       letters: set[range['a'..'z']]
-      dontSave {.skipSerialisation.}: ref int
+      dontSave {.skipSerialization.}: ref int
 
   proc `==`(a, b: MyObject): bool {.noSideEffect.} =
     system.`==`(a, b)
@@ -38,7 +38,7 @@ when isMainModule:
 
   proc main() =
     var encoder = Encoder.init()
-    encoder.serialiseRoot(obj)
+    encoder.serializeRoot(obj)
     encoder.save "/tmp/test.vsbf"
 
     var
@@ -48,7 +48,7 @@ when isMainModule:
 
     var decoder = Decoder.init(theFile)
     obj.dontSave = nil
-    assert decoder.deserialiseRoot(MyObject) == obj
+    assert decoder.deserializeRoot(MyObject) == obj
     decoder = Decoder.init(theFile)
     decoder.pos = headerSize
     echo decoder.dump()
@@ -59,7 +59,7 @@ when isMainModule:
     var buffer: array[1024, byte]
     buffer[0..fileData.high] = (fileData.toOpenArrayByte(0, fileData.high))
     var oaDecoder = Decoder.init(buffer)
-    assert oaDecoder.deserialiseRoot(MyObject) == obj
+    assert oaDecoder.deserializeRoot(MyObject) == obj
     oaDecoder = Decoder.init(buffer)
     echo oaDecoder.dump()
 

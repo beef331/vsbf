@@ -137,17 +137,17 @@ proc init*(
   result = Decoder[openArray[byte]](stream: toUnsafeView data)
   result.readHeader()
 
-proc deserialise*(dec: var Decoder, i: var SomeInteger) =
+proc deserialize*(dec: var Decoder, i: var SomeInteger) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, i)
   dec.pos += dec.data.readLeb128(i)
 
-proc deserialise*(dec: var Decoder, f: var SomeFloat) =
+proc deserialize*(dec: var Decoder, f: var SomeFloat) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, f)
   dec.data.read(f)
 
-proc deserialise*(dec: var Decoder, str: var string) =
+proc deserialize*(dec: var Decoder, str: var string) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, str)
   var ind = 0
@@ -159,7 +159,7 @@ proc deserialise*(dec: var Decoder, str: var string) =
 
   str = dec.getStr(ind)
 
-proc deserialise*[Idx, T](dec: var Decoder, arr: var array[Idx, T]) =
+proc deserialize*[Idx, T](dec: var Decoder, arr: var array[Idx, T]) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, arr)
   var len = 0
@@ -171,19 +171,19 @@ proc deserialise*[Idx, T](dec: var Decoder, arr: var array[Idx, T]) =
           "', but got length of '" & $len & "'."
       )
   for i in 0..<len:
-    dec.deserialise(arr[i])
+    dec.deserialize(arr[i])
 
-proc deserialise*[T](dec: var Decoder, arr: var seq[T]) =
+proc deserialize*[T](dec: var Decoder, arr: var seq[T]) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, arr)
   var len = 0
   dec.pos += dec.data.readLeb128(len)
   arr = newSeq[T](len)
   for i in 0..<len:
-    dec.deserialise(arr[i])
+    dec.deserialize(arr[i])
 
-proc deserialise*[T: object | tuple](dec: var Decoder, obj: var T) =
-  mixin deserialise
+proc deserialize*[T: object | tuple](dec: var Decoder, obj: var T) =
+  mixin deserialize
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, obj)
 
@@ -198,59 +198,59 @@ proc deserialise*[T: object | tuple](dec: var Decoder, obj: var T) =
         else:
           fieldName
 
-      when not field.hasCustomPragma(skipSerialisation):
+      when not field.hasCustomPragma(skipSerialization):
         if realName == name:
-          deserialise(dec, field)
+          deserialize(dec, field)
 
   if dec.pos != dec.len - 1 and (let (typ, _) = dec.typeNamePair(); typ) != EndStruct: # Pops the end and ensures it's correct'
     raise (ref VsbfError)(msg: "Invalid struct expected EndStruct at {dec.pos}")
 
 
-proc deserialise*[T: range](dec: var Decoder, data: var T) =
+proc deserialize*[T: range](dec: var Decoder, data: var T) =
   var base = T.rangeBase().default()
-  dec.deserialise(base)
+  dec.deserialize(base)
   if base notin T.low..T.high:
     raise (ref VsbfError)(msg: "Stored value out of range got '" & $base & "' but expected: " & $T)
   data = T(base)
 
-proc deserialise*(dec: var Decoder, data: var (distinct)) =
-  dec.deserialise(distinctBase(data))
+proc deserialize*(dec: var Decoder, data: var (distinct)) =
+  dec.deserialize(distinctBase(data))
 
-proc deserialise*[T](dec: var Decoder, data: var set[T]) =
+proc deserialize*[T](dec: var Decoder, data: var set[T]) =
   const setSize = sizeof(data)
   when setSize == 1:
-    dec.deserialise(cast[ptr uint8](data.addr)[])
+    dec.deserialize(cast[ptr uint8](data.addr)[])
   elif setSize == 2:
-    dec.deserialise(cast[ptr uint16](data.addr)[])
+    dec.deserialize(cast[ptr uint16](data.addr)[])
   elif setSize == 4:
-    dec.deserialise(cast[ptr uint32](data.addr)[])
+    dec.deserialize(cast[ptr uint32](data.addr)[])
   elif setSize == 8:
-    dec.deserialise(cast[ptr uint64](data.addr)[])
+    dec.deserialize(cast[ptr uint64](data.addr)[])
   else:
-    dec.deserialise(cast[ptr array[setSize, byte]](data.addr)[])
+    dec.deserialize(cast[ptr array[setSize, byte]](data.addr)[])
 
-proc deserialise*[T: range | enum](dec: var Decoder, data: var T) =
+proc deserialize*[T: range | enum](dec: var Decoder, data: var T) =
   let
     start = dec.pos
     (typ, nameInd) = dec.typeNamePair()
   canConvertFrom(typ, data)
 
   var base = default T.rangeBase()
-  dec.deserialise(base)
+  dec.deserialize(base)
   if base notin T.low..T.high:
     raise (ref VsbfError)(msg: "Cannot convert to range got '{base}', but expected value in '{T}'. At position: '{dec.pos}'")
 
 
-proc deserialise*(dec: var Decoder, data: var ref) =
+proc deserialize*(dec: var Decoder, data: var ref) =
   let (typ, nameInd) = dec.typeNamePair()
   canConvertFrom(typ, data)
   let isRefNil = dec.data[0]
   dec.pos += 1
   if not isRefNil:
     new data
-  dec.deserialise(data[])
+  dec.deserialize(data[])
 
-proc deserialiseRoot*(dec: var Decoder, T: typedesc[object or tuple]): T =
+proc deserializeRoot*(dec: var Decoder, T: typedesc[object or tuple]): T =
   let (typ, name) = dec.peekTypeNamePair()
   canConvertFrom(typ, result)
   if name != "":
@@ -258,4 +258,4 @@ proc deserialiseRoot*(dec: var Decoder, T: typedesc[object or tuple]): T =
         msg:
           "Expected a nameless root, but it was named: " & name
       )
-  dec.deserialise(result)
+  dec.deserialize(result)

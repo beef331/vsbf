@@ -4,7 +4,7 @@ const
   header* = ['v', 's', 'b', 'f', version[0], version[1]]
   headerSize* = header.len
 
-template skipSerialisation*() {.pragma.}
+template skipSerialization*() {.pragma.}
 template vsbfName*(s: string) {.pragma.}
 
 type

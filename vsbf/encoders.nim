@@ -65,88 +65,88 @@ proc cacheStr*(encoder: var Encoder, str: sink string) =
     encoder.writeTo(str.toOpenArrayByte(0, str.high))
     encoder.strs[str] = encoder.strs.len
 
-proc serialiseTypeInfo[T](encoder: var Encoder, val: T, name: sink string) =
+proc serializeTypeInfo[T](encoder: var Encoder, val: T, name: sink string) =
   ## Stores the typeID and name if it's required(0b1xxx_xxxx if there is a name)
   encoder.writeTo T.vsbfId.encoded(name.len > 0)
   if name.len > 0:
     encoder.cacheStr(name)
 
-proc serialise*(encoder: var Encoder, i: SomeInteger | enum | byte | char | bool, name: string) =
-  serialiseTypeInfo(encoder, i, name)
+proc serialize*(encoder: var Encoder, i: SomeInteger | enum | byte | char | bool, name: string) =
+  serializeTypeInfo(encoder, i, name)
   let (data, len) = leb128 i
   encoder.writeTo data.toOpenArray(0, len - 1)
 
-proc serialise*(encoder: var Encoder, i: enum, name: string) =
-  serialiseTypeInfo(encoder, i, name)
+proc serialize*(encoder: var Encoder, i: enum, name: string) =
+  serializeTypeInfo(encoder, i, name)
   let (data, len) = leb128 int64(i)
   encoder.writeTo data.toOpenArray(0, len - 1)
 
-proc serialise*(encoder: var Encoder, f: SomeFloat, name: string) =
-  serialiseTypeInfo(encoder, f, name)
+proc serialize*(encoder: var Encoder, f: SomeFloat, name: string) =
+  serializeTypeInfo(encoder, f, name)
   when f is float32:
     encoder.writeTo cast[int32](f)
   else:
     encoder.writeTo cast[int64](f)
 
-proc serialise*(encoder: var Encoder, str: sink string, name: string) =
-  serialiseTypeInfo(encoder, str, name)
+proc serialize*(encoder: var Encoder, str: sink string, name: string) =
+  serializeTypeInfo(encoder, str, name)
   encoder.cacheStr(str)
 
-proc serialise*[Idx, T](encoder: var Encoder, arr: sink array[Idx, T], name: string) =
-  serialiseTypeInfo(encoder, arr, name)
+proc serialize*[Idx, T](encoder: var Encoder, arr: sink array[Idx, T], name: string) =
+  serializeTypeInfo(encoder, arr, name)
   let (data, len) = leb128 arr.len
   encoder.writeTo data.toOpenArray(0, len - 1)
   for val in arr.mitems:
-    encoder.serialise(val, "")
+    encoder.serialize(val, "")
 
-proc serialise*[T](encoder: var Encoder, arr: sink seq[T], name: string) =
-  serialiseTypeInfo(encoder, arr, name)
+proc serialize*[T](encoder: var Encoder, arr: sink seq[T], name: string) =
+  serializeTypeInfo(encoder, arr, name)
   let (data, len) = leb128 arr.len
   encoder.writeTo data.toOpenArray(0, len - 1)
   for val in arr.mitems:
-    encoder.serialise(val, "")
+    encoder.serialize(val, "")
   wasMoved(arr)
 
-proc serialise*[T: object | tuple](encoder: var Encoder, obj: T, name: string) =
-  mixin serialise
-  serialiseTypeInfo(encoder, obj, name)
+proc serialize*[T: object | tuple](encoder: var Encoder, obj: T, name: string) =
+  mixin serialize
+  serializeTypeInfo(encoder, obj, name)
   for fieldName, field in obj.fieldPairs:
     const realName =
       when field.hasCustomPragma(vsbfName):
         field.getCustomPragmaVal(vsbfName)
       else:
         fieldName
-    when not field.hasCustomPragma(skipSerialisation):
-      encoder.serialise(field, fieldName)
+    when not field.hasCustomPragma(skipSerialization):
+      encoder.serialize(field, fieldName)
 
   encoder.writeTo EndStruct.encoded(false)
 
 
-proc serialise*(encoder: var Encoder, data: sink(ref), name: string) =
-  serialiseTypeInfo(encoder, data, name)
+proc serialize*(encoder: var Encoder, data: sink(ref), name: string) =
+  serializeTypeInfo(encoder, data, name)
   encoder.writeTo byte(data != nil)
   if data != nil:
-    encoder.serialise(data[], "")
+    encoder.serialize(data[], "")
 
-proc serialise*(encoder: var Encoder, data: sink (distinct), name: string) =
-  serialiseTypeInfo(encoder, distinctBase(data), name)
-  encoder.serialise(distinctBase(data), "")
+proc serialize*(encoder: var Encoder, data: sink (distinct), name: string) =
+  serializeTypeInfo(encoder, distinctBase(data), name)
+  encoder.serialize(distinctBase(data), "")
 
-proc serialise*[T](encoder: var Encoder, data: sink set[T], name: string) =
+proc serialize*[T](encoder: var Encoder, data: sink set[T], name: string) =
   const setSize = sizeof(data)
   when setSize == 1:
-    encoder.serialise(cast[uint8](data), name)
+    encoder.serialize(cast[uint8](data), name)
   elif setSize == 2:
-    encoder.serialise(cast[uint16](data), name)
+    encoder.serialize(cast[uint16](data), name)
   elif setSize == 4:
-    encoder.serialise(cast[uint32](data), name)
+    encoder.serialize(cast[uint32](data), name)
   elif setSize == 8:
-    encoder.serialise(cast[uint64](data), name)
+    encoder.serialize(cast[uint64](data), name)
   else:
-    encoder.serialise(cast[array[setSize, byte]](data), name)
+    encoder.serialize(cast[array[setSize, byte]](data), name)
 
-proc serialiseRoot*(encoder: var Encoder, val: sink (object or tuple)) =
-  encoder.serialise(val, "")
+proc serializeRoot*(encoder: var Encoder, val: sink (object or tuple)) =
+  encoder.serialize(val, "")
 
 proc write(stream: Stream, oa: openArray[byte]) =
   for x in oa:
