@@ -60,7 +60,7 @@ when isMainModule:
     buffer[0..fileData.high] = (fileData.toOpenArrayByte(0, fileData.high))
     var oaDecoder = Decoder.init(buffer)
     assert oaDecoder.deserialiseRoot(MyObject) == obj
-    oaDecoder.pos = headerSize
+    oaDecoder = Decoder.init(buffer)
     echo oaDecoder.dump()
 
   main()
