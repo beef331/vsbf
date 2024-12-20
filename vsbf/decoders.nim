@@ -1,4 +1,4 @@
-import std/[options, typetraits, tables]
+import std/[options, typetraits, tables, macros]
 import shared
 
 type
@@ -39,6 +39,17 @@ proc read[T](dec: var Decoder[T], data: typedesc): Option[data] =
   else:
     none(data)
 
+proc readString(dec: var Decoder) =
+  var strLen = 0
+  dec.pos += dec.data.readLeb128(strLen)
+  var buffer = newString(strLen)
+
+  for i in 0..<strLen:
+    buffer[i] = char dec.data[i]
+
+  dec.strs.add buffer
+  dec.pos += strLen
+
 proc typeNamePair*(
     dec: var Decoder
 ): tuple[typ: SerialisationType, nameInd: options.Option[int]] =
@@ -53,12 +64,21 @@ proc typeNamePair*(
 
   if hasName:
     var ind = 0
-    dec.pos += dec.data.readLeb128(ind)
+    let indSize = dec.data.readLeb128(ind)
+    dec.pos += indSize
     result.nameInd = some(ind)
+    if indSize > 0:
+      if ind notin 0..dec.strs.high:
+        dec.readString()
+    else:
+      raise (ref VsbfError)(msg: "No name following a declaration.")
+
+
+
 
 proc peekTypeNamePair*(
     dec: var Decoder
-): tuple[typ: SerialisationType, nameInd: options.Option[int]] =
+): tuple[typ: SerialisationType, name: string] =
   ## peek the type and name's string index if it has it
   let encodedType = dec.data[0]
   var hasName: bool
@@ -66,8 +86,18 @@ proc peekTypeNamePair*(
 
   if hasName:
     var val = 0
-    if dec.data.toOpenArray(1).readLeb128(val) > 0:
-      result.nameInd = some(val)
+    let indSize = dec.data.toOpenArray(1).readLeb128(val)
+    if indSize > 0:
+      if val notin 0..dec.strs.high:
+        var strLen = 0
+        let
+          strLenBytes = dec.data.toOpenArray(1 + indSize).readLeb128(strLen)
+          start = 1 + indSize + strLenBytes
+        result.name = newString(strLen)
+        for i, x in dec.data.toOpenArray(start, start + strLen - 1):
+          result.name[i] = char x
+      else:
+        result.name = dec.strs[val]
     else:
       raise (ref VsbfError)(msg: "No name following a declaration.")
 
@@ -93,17 +123,6 @@ proc readHeaderAndExtractStrings(dec: var Decoder) =
     raise (ref VsbfError)(msg: "Not enough data.")
 
   dec.pos += read
-  for _ in 0..<len:
-    var len = 0
-    let read = dec.data.readLeb128(len)
-    if read == 0:
-      raise (ref VsbfError)(msg: "Not enough data.")
-    dec.pos += read
-    var str = newString(len)
-    for i, x in dec.data.toOpenArray(0, len - 1):
-      str[i] = char(x)
-    dec.strs.add ensureMove str
-    dec.pos += len
 
 proc init*(
     _: typedesc[Decoder], useNames: bool, data: sink seq[byte]
@@ -141,6 +160,10 @@ proc deserialise*(dec: var Decoder, str: var string) =
   var ind = 0
   dec.pos += dec.data.readLeb128(ind)
 
+  if ind notin 0..dec.strs.high:
+    # It has not been read into yet
+    dec.readString()
+
   str = dec.getStr(ind)
 
 proc deserialise*[Idx, T](dec: var Decoder, arr: var array[Idx, T]) =
@@ -167,8 +190,9 @@ proc deserialise*[T](dec: var Decoder, arr: var seq[T]) =
     dec.deserialise(arr[i])
 
 proc fieldCount(T: typedesc): int =
-  for _ in default(T).fields:
-    inc result
+  for field in default(T).fields:
+    when not field.hasCustomPragma(vsbfUnserialized):
+      inc result
 
 proc deserialise*(dec: var Decoder, obj: var (object or tuple)) =
   mixin deserialise
@@ -180,24 +204,34 @@ proc deserialise*(dec: var Decoder, obj: var (object or tuple)) =
       ## Does not work for object variants... need a think
       let
         start = parsed
-        (_, nameInd) = dec.peekTypeNamePair()
+        (_, name) = dec.peekTypeNamePair()
 
-      if nameInd.isNone:
-        raise (ref VsbfError)(msg: "Expected name here")
+      if name == "":
+        raise (ref VsbfError)(msg: "Expected name at: " & $dec.pos)
 
-      for name, field in obj.fieldPairs:
-        if name == dec.getStr(nameInd.unsafeGet):
-          deserialise(dec, field)
-          inc parsed
+
+      for fieldName, field in obj.fieldPairs:
+        when not field.hasCustomPragma(vsbfUnserialized):
+          if fieldName == name:
+            deserialise(dec, field)
+            inc parsed
 
       if parsed == start:
         raise (ref VsbfError)(msg: "Cannot parse the given data to the type")
   else:
     for field in obj.fields:
-      let (_, nameInd) = dec.peekTypeNamePair()
-      if nameInd.isSome:
-        raise (ref VsbfError)(msg: "Has name but expected no name.")
-      deserialise(dec, field)
+      when not field.hasCustomPragma(vsbfUnserialized):
+        let (_, name) = dec.peekTypeNamePair()
+        if name != "":
+          raise (ref VsbfError)(msg: "Has name but expected no name.")
+        deserialise(dec, field)
+
+proc deserialise*[T: range](dec: var Decoder, data: var T) =
+  var base = T.rangeBase().default()
+  dec.deserialise(base)
+  if base notin T.low..T.high:
+    raise (ref VsbfError)(msg: "Stored value out of range got '" & $base & "' but expected: " & $T)
+  data = T(base)
 
 proc deserialise*(dec: var Decoder, data: var (distinct)) =
   dec.deserialise(distinctBase(data))
@@ -225,11 +259,11 @@ proc deserialise*(dec: var Decoder, data: var ref) =
   dec.deserialise(data[])
 
 proc deserialiseRoot*(dec: var Decoder, T: typedesc[object or tuple]): T =
-  let (typ, nameInd) = dec.peekTypeNamePair()
+  let (typ, name) = dec.peekTypeNamePair()
   canConvertFrom(typ, result)
-  if nameInd.isSome():
+  if name != "":
     raise (ref VsbfError)(
         msg:
-          "Expected a nameless root, but it was named: " & dec.getStr(nameInd.unsafeGet)
+          "Expected a nameless root, but it was named: " & name
       )
   dec.deserialise(result)
