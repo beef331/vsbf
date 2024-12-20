@@ -3,9 +3,10 @@
 ## Say data was saved as a `Float32` but now is an `Int32` we can know this and do `int32(floatVal)`
 
 import vsbf/[shared, decoders, encoders]
-export vsbfUnserialized, decoders, encoders
+export skipSerialisation, decoders, encoders
 
 when isMainModule:
+  import vsbf/dumper
 
   type
     MyObject = object
@@ -16,11 +17,12 @@ when isMainModule:
       children: seq[MyObject]
       pets: seq[string]
       letters: set[range['a'..'z']]
+      dontSave {.skipSerialisation.}: ref int
 
   proc `==`(a, b: MyObject): bool {.noSideEffect.} =
     system.`==`(a, b)
 
-  let
+  var
     obj =
       MyObject(
         x: 100,
@@ -31,32 +33,34 @@ when isMainModule:
         pets: @["Sam", "Diesel"],
         letters: {'a'..'z'},
         children: newSeq[MyObject](5),
+        dontSave: new int
       )
 
   proc main() =
-    var encoder = Encoder.init(true)
+    var encoder = Encoder.init()
     encoder.serialiseRoot(obj)
     encoder.save "/tmp/test.vsbf"
-    encoder = Encoder.init(false)
-    encoder.serialiseRoot(obj)
-    encoder.save "/tmp/test1.vsbf"
 
     var
       fileData = readFile("/tmp/test.vsbf")
       theFile = @(fileData.toOpenArrayByte(0, fileData.high))
     let dataAddr = theFile[0].addr
 
-    var decoder = Decoder.init(true, theFile)
-
+    var decoder = Decoder.init(theFile)
+    obj.dontSave = nil
     assert decoder.deserialiseRoot(MyObject) == obj
+    decoder = Decoder.init(theFile)
+    decoder.pos = headerSize
+    echo decoder.dump()
+
     var buff = decoder.close()
     assert buff[0].addr == dataAddr # We are reusing the buffer!
 
-    fileData = readFile("/tmp/test1.vsbf")
     var buffer: array[1024, byte]
-
     buffer[0..fileData.high] = (fileData.toOpenArrayByte(0, fileData.high))
-    var oaDecoder = Decoder.init(false, buffer)
+    var oaDecoder = Decoder.init(buffer)
     assert oaDecoder.deserialiseRoot(MyObject) == obj
+    oaDecoder.pos = headerSize
+    echo oaDecoder.dump()
 
   main()

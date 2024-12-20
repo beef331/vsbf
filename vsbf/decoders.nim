@@ -1,4 +1,4 @@
-import std/[options, typetraits, tables, macros]
+import std/[options, typetraits, tables, macros, strformat]
 import shared
 
 type
@@ -9,13 +9,14 @@ type
     else:
       stream*: UnsafeView[byte]
     pos*: int
-    useNames: bool
+
+proc len(dec: Decoder): int = dec.stream.len
 
 template data*[T](decoder: Decoder[T]): untyped =
   decoder.stream.toOpenArray(decoder.pos, decoder.stream.len - 1)
 
 proc read[T: SomeInteger](oa: openArray[byte], res: var T): bool =
-  if sizeof(T) < oa.len:
+  if sizeof(T) <= oa.len:
     res = T(0)
     for i in T(0)..<sizeof(T):
       res = res or (T(oa[int i]) shl (i * 8))
@@ -39,7 +40,7 @@ proc read[T](dec: var Decoder[T], data: typedesc): Option[data] =
   else:
     none(data)
 
-proc readString(dec: var Decoder) =
+proc readString*(dec: var Decoder) =
   var strLen = 0
   dec.pos += dec.data.readLeb128(strLen)
   var buffer = newString(strLen)
@@ -104,7 +105,7 @@ proc peekTypeNamePair*(
 proc getStr*(dec: Decoder, ind: int): lent string =
   dec.strs[ind]
 
-proc readHeaderAndExtractStrings(dec: var Decoder) =
+proc readHeader(dec: var Decoder) =
   var ext = dec.read(array[4, char])
   if ext.isNone or ext.unsafeGet != "vsbf":
     raise (ref VsbfError)(msg: "Not a VSBF stream, missing the header")
@@ -117,32 +118,24 @@ proc readHeaderAndExtractStrings(dec: var Decoder) =
 
   dec.pos += 2
 
-  var len = 0
-  let read = dec.data.readLeb128(len)
-  if read == 0:
-    raise (ref VsbfError)(msg: "Not enough data.")
-
-  dec.pos += read
-
 proc init*(
-    _: typedesc[Decoder], useNames: bool, data: sink seq[byte]
+    _: typedesc[Decoder], data: sink seq[byte]
 ): Decoder[seq[byte]] =
   ## Heap allocated version, it manages it's own buffer you give it and reads from this.
   ## Can recover the buffer using `close` after parsin
-  result = Decoder[seq[byte]](stream: data, useNames: useNames)
-  result.readHeaderAndExtractStrings()
+  result = Decoder[seq[byte]](stream: data)
+  result.readHeader()
   # We now should be sitting right on the root entry's typeId
 
 proc close*(decoder: sink Decoder[seq[byte]]): seq[byte] =
   ensureMove(decoder.stream)
 
 proc init*(
-    _: typedesc[Decoder], useNames: bool, data: openArray[byte]
+    _: typedesc[Decoder], data: openArray[byte]
 ): Decoder[openArray[byte]] =
   ## Non heap allocating version of the decoder uses preallocated memory that must outlive the structure
-  result = Decoder[openArray[byte]](stream: toUnsafeView data, useNames: useNames)
-  result.readHeaderAndExtractStrings()
-  # We now should be sitting right on the root entry's typeId
+  result = Decoder[openArray[byte]](stream: toUnsafeView data)
+  result.readHeader()
 
 proc deserialise*(dec: var Decoder, i: var SomeInteger) =
   let (typ, _) = dec.typeNamePair()
@@ -189,42 +182,23 @@ proc deserialise*[T](dec: var Decoder, arr: var seq[T]) =
   for i in 0..<len:
     dec.deserialise(arr[i])
 
-proc fieldCount(T: typedesc): int =
-  for field in default(T).fields:
-    when not field.hasCustomPragma(vsbfUnserialized):
-      inc result
-
-proc deserialise*(dec: var Decoder, obj: var (object or tuple)) =
+proc deserialise*[T: object | tuple](dec: var Decoder, obj: var T) =
   mixin deserialise
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, obj)
-  if dec.useNames:
-    var parsed = 0
-    while parsed < fieldCount(typeof obj):
-      ## Does not work for object variants... need a think
-      let
-        start = parsed
-        (_, name) = dec.peekTypeNamePair()
 
-      if name == "":
-        raise (ref VsbfError)(msg: "Expected name at: " & $dec.pos)
+  while (let (typ, name) = dec.peekTypeNamePair(); typ) != EndStruct:
+    if name == "":
+      raise (ref VsbfError)(msg: "Expected name at: " & $dec.pos)
 
+    for fieldName, field in obj.fieldPairs:
+      when not field.hasCustomPragma(skipSerialisation):
+        if fieldName == name:
+          deserialise(dec, field)
 
-      for fieldName, field in obj.fieldPairs:
-        when not field.hasCustomPragma(vsbfUnserialized):
-          if fieldName == name:
-            deserialise(dec, field)
-            inc parsed
+  if dec.pos != dec.len - 1 and (let (typ, _) = dec.typeNamePair(); typ) != EndStruct: # Pops the end and ensures it's correct'
+    raise (ref VsbfError)(msg: "Invalid struct expected EndStruct at {dec.pos}")
 
-      if parsed == start:
-        raise (ref VsbfError)(msg: "Cannot parse the given data to the type")
-  else:
-    for field in obj.fields:
-      when not field.hasCustomPragma(vsbfUnserialized):
-        let (_, name) = dec.peekTypeNamePair()
-        if name != "":
-          raise (ref VsbfError)(msg: "Has name but expected no name.")
-        deserialise(dec, field)
 
 proc deserialise*[T: range](dec: var Decoder, data: var T) =
   var base = T.rangeBase().default()
@@ -248,6 +222,18 @@ proc deserialise*[T](dec: var Decoder, data: var set[T]) =
     dec.deserialise(cast[ptr uint64](data.addr)[])
   else:
     dec.deserialise(cast[ptr array[setSize, byte]](data.addr)[])
+
+proc deserialise*[T: range | enum](dec: var Decoder, data: var T) =
+  let
+    start = dec.pos
+    (typ, nameInd) = dec.typeNamePair()
+  canConvertFrom(typ, data)
+
+  var base = default T.rangeBase()
+  dec.deserialise(base)
+  if base notin T.low..T.high:
+    raise (ref VsbfError)(msg: "Cannot convert to range got '{base}', but expected value in '{T}'. At position: '{dec.pos}'")
+
 
 proc deserialise*(dec: var Decoder, data: var ref) =
   let (typ, nameInd) = dec.typeNamePair()

@@ -2,8 +2,9 @@ import std/strutils
 const
   version* = "\1\0"
   header* = ['v', 's', 'b', 'f', version[0], version[1]]
+  headerSize* = header.len
 
-template vsbfUnserialized*() {.pragma.}
+template skipSerialisation*() {.pragma.}
 
 type
   SerialisationType* = enum
@@ -19,6 +20,7 @@ type
     String ## Strings are stored in a 'String section'
     Array
     Struct
+    EndStruct # Marks we've finished reading
     Option ## If the next byte is 0x1 you parse the internal otherwise you skip
     Reserved = 127
       ## Highest number of builtin types, going past this will cause issues with how name tagging works.

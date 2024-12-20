@@ -15,21 +15,17 @@ type
         ## The data section, first value should be the 'entry' and is a `typeId` that determines how all the data is parsed.
         ## In the future this may be enforced to be a `Struct` or custom type
       dataPos*: int
-    storeNames: bool
-      ## Whether we set the first bit to high where applicable (struct fields)
 
 proc init*(
-    _: typedesc[Encoder], storeNames: bool, strsBuffer, dataBuffer: openArray[byte]
+    _: typedesc[Encoder], strsBuffer, dataBuffer: openArray[byte]
 ): Encoder =
   Encoder(
     dataBuffer: dataBuffer.toUnsafeView(),
-    storeNames: storeNames,
   )
 
-proc init*(_: typedesc[Encoder], storeNames: bool): Encoder[seq[byte]] =
+proc init*(_: typedesc[Encoder]): Encoder[seq[byte]] =
   Encoder[seq[byte]](
     dataBuffer: newSeqOfCap[byte](256),
-    storeNames: storeNames,
   )
 
 template offsetDataBuffer*(encoder: Encoder[openArray[byte]]): untyped =
@@ -71,11 +67,11 @@ proc cacheStr*(encoder: var Encoder, str: sink string) =
 
 proc serialiseTypeInfo[T](encoder: var Encoder, val: T, name: sink string) =
   ## Stores the typeID and name if it's required(0b1xxx_xxxx if there is a name)
-  encoder.writeTo T.vsbfId.encoded(encoder.storeNames and name.len > 0)
-  if encoder.storeNames and name.len > 0:
+  encoder.writeTo T.vsbfId.encoded(name.len > 0)
+  if name.len > 0:
     encoder.cacheStr(name)
 
-proc serialise*(encoder: var Encoder, i: SomeInteger, name: string) =
+proc serialise*(encoder: var Encoder, i: SomeInteger | enum | byte | char | bool, name: string) =
   serialiseTypeInfo(encoder, i, name)
   let (data, len) = leb128 i
   encoder.writeTo data.toOpenArray(0, len - 1)
@@ -111,12 +107,15 @@ proc serialise*[T](encoder: var Encoder, arr: sink seq[T], name: string) =
     encoder.serialise(val, "")
   wasMoved(arr)
 
-proc serialise*(encoder: var Encoder, obj: sink (object or tuple), name: string) =
+proc serialise*[T: object | tuple](encoder: var Encoder, obj: T, name: string) =
   mixin serialise
   serialiseTypeInfo(encoder, obj, name)
-  for name, field in obj.fieldPairs:
-    when not field.hasCustomPragma(vsbfUnserialized):
-      encoder.serialise(field, name)
+  for fieldName, field in obj.fieldPairs:
+    when not field.hasCustomPragma(skipSerialisation):
+      encoder.serialise(field, fieldName)
+
+  encoder.writeTo EndStruct.encoded(false)
+
 
 proc serialise*(encoder: var Encoder, data: sink(ref), name: string) =
   serialiseTypeInfo(encoder, data, name)
@@ -156,6 +155,4 @@ proc save*(encoder: var Encoder, path: string) =
   defer:
     fs.close
   fs.write header
-  let (data, len) = leb128 encoder.strs.len
-  fs.write data.toOpenArray(0, len - 1)
   fs.write encoder.data
