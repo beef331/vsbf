@@ -192,8 +192,14 @@ proc deserialise*[T: object | tuple](dec: var Decoder, obj: var T) =
       raise (ref VsbfError)(msg: "Expected name at: " & $dec.pos)
 
     for fieldName, field in obj.fieldPairs:
+      const realName =
+        when field.hasCustomPragma(vsbfName):
+          field.getCustomPragmaVal(vsbfName)
+        else:
+          fieldName
+
       when not field.hasCustomPragma(skipSerialisation):
-        if fieldName == name:
+        if realName == name:
           deserialise(dec, field)
 
   if dec.pos != dec.len - 1 and (let (typ, _) = dec.typeNamePair(); typ) != EndStruct: # Pops the end and ensures it's correct'

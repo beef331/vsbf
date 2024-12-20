@@ -111,6 +111,11 @@ proc serialise*[T: object | tuple](encoder: var Encoder, obj: T, name: string) =
   mixin serialise
   serialiseTypeInfo(encoder, obj, name)
   for fieldName, field in obj.fieldPairs:
+    const realName =
+      when field.hasCustomPragma(vsbfName):
+        field.getCustomPragmaVal(vsbfName)
+      else:
+        fieldName
     when not field.hasCustomPragma(skipSerialisation):
       encoder.serialise(field, fieldName)
 

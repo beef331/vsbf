@@ -48,7 +48,7 @@ proc dumpDispatch(dec: var Decoder, kind: SerialisationType, indent: int): strin
   of String:
     dec.dumpString(indent + 1)
   else:
-    raise (ref VsbfError)(msg: "Cannot dump type of unknown serialisation. " & $kind)
+    raise (ref VsbfError)(msg: "Cannot dump type of unknown serialisation. " & $kind & " At position: " & $dec.pos)
 
 proc dumpStruct(dec: var Decoder, indent: int): string =
   result.add indent.indented() & $Struct & "\n"

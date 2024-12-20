@@ -5,6 +5,7 @@ const
   headerSize* = header.len
 
 template skipSerialisation*() {.pragma.}
+template vsbfName*(s: string) {.pragma.}
 
 type
   SerialisationType* = enum
