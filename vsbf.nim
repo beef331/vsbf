@@ -39,7 +39,7 @@ when isMainModule:
   proc main() =
     var encoder = Encoder.init()
     encoder.serializeRoot(obj)
-    encoder.save "/tmp/test.vsbf"
+    writeFile("/tmp/test.vsbf", encoder.data)
 
     var
       fileData = readFile("/tmp/test.vsbf")

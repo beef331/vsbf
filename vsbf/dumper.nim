@@ -1,6 +1,6 @@
 ## This walks through the VBSF and prints the structure stored inside
 import shared, decoders
-import std/[options, strutils]
+import std/[options, strutils, strformat]
 
 proc indented(amount: int): string = "  ".repeat(amount)
 
@@ -11,9 +11,22 @@ proc dumpInteger(dec: var Decoder, kind: SerialisationType, indent: int): string
   indent.indented() & $kind & ": " & $val
 
 proc dumpFloat(dec: var Decoder, kind: SerialisationType, indent: int): string =
-  var val: int
-  dec.pos += dec.data.readleb128(val)
-  "  ".repeat(indent) & $kind & ": " & $cast[float](val)
+  case kind
+  of Float32:
+    var val = 0i32
+    if not dec.data.read(val):
+      raise (ref VsbfError)(msg: fmt"Could not read a float32 at position {dec.pos}")
+    dec.pos += sizeof(float32)
+    "  ".repeat(indent) & $kind & ": " & $cast[float32](val)
+  of Float64:
+    var val = 0i64
+    if not dec.data.read(val):
+      raise (ref VsbfError)(msg: fmt"Could not read a float64 at position {dec.pos}")
+    dec.pos += sizeof(float64)
+    "  ".repeat(indent) & $kind & ": " & $cast[float](val)
+  else:
+    doAssert false, "Somehow got into float logic with: " & $kind
+    ""
 
 proc dumpString(dec: var Decoder, indent: int): string =
   var ind = 0
@@ -48,11 +61,11 @@ proc dumpDispatch(dec: var Decoder, kind: SerialisationType, indent: int): strin
   of String:
     dec.dumpString(indent + 1)
   else:
-    raise (ref VsbfError)(msg: "Cannot dump type of unknown serialisation. " & $kind & " At position: " & $dec.pos)
+    raise (ref VsbfError)(msg: fmt"Cannot dump type of unknown serialisation. {$kind} At position: {dec.pos}")
 
 proc dumpStruct(dec: var Decoder, indent: int): string =
   result.add indent.indented() & $Struct & "\n"
-  while (var (typ, _) = dec.peekTypeNamePair; typ) != EndStruct:
+  while not(dec.atEnd) and (var (typ, _) = dec.peekTypeNamePair(); typ) != EndStruct:
     var name = none(int)
     (typ, name) = dec.typeNamePair()
 
@@ -60,12 +73,17 @@ proc dumpStruct(dec: var Decoder, indent: int): string =
     if name.isSome:
       result.add dec.strs[name.get]
       result.add " "
-    result.add dec.dumpDispatch(typ, 0)
-    result.add "\n"
+    try:
+      result.add dec.dumpDispatch(typ, 0)
+      result.add "\n"
+    except VsbfError:
+      echo "Failed Partial Dump: "
+      echo result
+      raise
 
-  var (typ, _) = dec.peekTypeNamePair()
-  if typ == EndStruct:
-    discard dec.typeNamePair()
+
+  if (let (typ, _) = dec.typeNamePair(); typ) != EndStruct: # Pops the end and ensures it's correct'
+    raise (ref VsbfError)(msg: fmt"Invalid struct expected EndStruct at {dec.pos}")
 
 
 proc dumpArray(dec: var Decoder, indent: int): string =
@@ -73,7 +91,9 @@ proc dumpArray(dec: var Decoder, indent: int): string =
   dec.pos += dec.data.readLeb128(len)
   result.add indent.indented() & "["
   for _ in 0..<len:
-    let (typ, _) = dec.typeNamePair()
+    let (typ, nameInd) = dec.typeNamePair()
+    if nameInd.isSome:
+      raise (ref VsbfError)(msg: "No name expected for array element, but got one. Position {dec.pos}")
     result.add "\n"
     result.add dec.dumpDispatch(typ, indent + 1)
     result.add ", "
@@ -100,5 +120,15 @@ proc dump*(dec: var Decoder): string =
   assert nameInd.isNone()
   dec.dumpDispatch(typ, 0)
 
+
+
+when isMainModule:
+  import std/os
+  let file = open(paramStr(1), fmRead)
+  var buffer = newSeq[byte](file.getFileSize())
+  discard file.readBuffer(buffer[0].addr, buffer.len)
+  var decoder = Decoder.init(buffer)
+  echo decoder.dump()
+  file.close()
 
 

@@ -1,4 +1,4 @@
-import std/strutils
+import std/[strutils, options]
 const
   version* = "\1\0"
   header* = ['v', 's', 'b', 'f', version[0], version[1]]
@@ -54,11 +54,11 @@ proc decodeType*(data: byte): tuple[typ: SerialisationType, hasName: bool] =
   result.hasName = (0b1000_0000u8 and data) > 0 # Extract whether the lastbit is set
   result.typ = cast[SerialisationType](data and 0b0111_1111)
 
-proc canConvertFrom*(typ: SerialisationType, val: auto) =
-  mixin vsbfid
+proc canConvertFrom*(typ: SerialisationType, val: auto, pos: int) =
+  mixin vsbfId
   const expected = typeof(val).vsbfId()
   if typ != expected:
-    raise (ref VsbfError)(msg: "Expected: " & $expected & " but got " & $typ)
+    raise (ref VsbfError)(msg: "Expected: " & $expected & " but got " & $typ & ". Position: " & $(pos - 1))
 
 proc toUnsafeView*[T](oa: openArray[T]): UnsafeView[T] =
   UnsafeView[T](data: cast[ptr UncheckedArray[T]](oa[0].addr), len: oa.len)
@@ -207,3 +207,6 @@ proc vsbfId*(_: typedesc[ref]): SerialisationType =
 
 proc vsbfId*(_: typedesc[enum]): SerialisationType =
   Int64
+
+proc vsbfId*(_: typedesc[Option]): SerialisationType =
+  Option
