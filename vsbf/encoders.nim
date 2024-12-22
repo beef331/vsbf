@@ -82,12 +82,13 @@ proc serialize*(encoder: var Encoder, i: SomeInteger, name: string) =
 
 proc serialize*(encoder: var Encoder, b: bool, name: string) =
   serializeTypeInfo(encoder, b, name)
-  encoder.writeTo [b.byte]
+  encoder.writeTo b.byte
 
-proc serialize*(encoder: var Encoder, i: enum | char, name: string) =
-  serializeTypeInfo(encoder, i, name)
-  let (data, len) = leb128 int64(i)
-  encoder.writeTo data.toOpenArray(0, len - 1)
+proc serialize*(encoder: var Encoder, i: enum, name: string) =
+ encoder.serialize(int64(i), name)
+
+proc serialize*(encoder: var Encoder, ch: char, name: string) =
+ encoder.serialize(byte(ch), name)
 
 proc serialize*(encoder: var Encoder, f: SomeFloat, name: string) =
   serializeTypeInfo(encoder, f, name)
@@ -100,14 +101,7 @@ proc serialize*(encoder: var Encoder, str: string, name: string) =
   serializeTypeInfo(encoder, str, name)
   encoder.cacheStr(str)
 
-proc serialize*[Idx, T](encoder: var Encoder, arr: array[Idx, T], name: string) =
-  serializeTypeInfo(encoder, arr, name)
-  let (data, len) = leb128 arr.len
-  encoder.writeTo data.toOpenArray(0, len - 1)
-  for val in arr.items:
-    encoder.serialize(val, "")
-
-proc serialize*[T](encoder: var Encoder, arr: seq[T], name: string) =
+proc serialize*[T](encoder: var Encoder, arr: openArray[T], name: string) =
   serializeTypeInfo(encoder, arr, name)
   let (data, len) = leb128 arr.len
   encoder.writeTo data.toOpenArray(0, len - 1)
@@ -118,7 +112,7 @@ proc serialize*[T: object | tuple](encoder: var Encoder, obj: T, name: string) =
   mixin serialize
   serializeTypeInfo(encoder, obj, name)
   for fieldName, field in obj.fieldPairs:
-    const realName =
+    const realName {.used.} =
       when field.hasCustomPragma(vsbfName):
         field.getCustomPragmaVal(vsbfName)
       else:
@@ -135,7 +129,6 @@ proc serialize*(encoder: var Encoder, data: ref, name: string) =
   if data != nil:
     encoder.serialize(data[], "")
 
-
 proc serialize*[T: Option](encoder: var Encoder, data: T, name: string) =
   serializeTypeInfo(encoder, data, name)
   encoder.writeTo byte(data.isSome)
@@ -143,11 +136,9 @@ proc serialize*[T: Option](encoder: var Encoder, data: T, name: string) =
     encoder.serialize(data.unsafeGet, "")
 
 proc serialize*(encoder: var Encoder, data: distinct, name: string) =
-  serializeTypeInfo(encoder, distinctBase(data), name)
   encoder.serialize(distinctBase(data), "")
 
 proc serialize*[T: range](encoder: var Encoder, data: T, name: string) =
-  serializeTypeInfo(encoder, data, name)
   encoder.serialize((T.rangeBase) data, name)
 
 proc serialize*[T](encoder: var Encoder, data: set[T], name: string) =

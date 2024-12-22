@@ -258,34 +258,34 @@ proc deserialize*(dec: var Decoder, data: var bool) =
   data = dec.data[0].bool
   inc dec.pos
 
-proc deserialize*[T: enum | char](dec: var Decoder, data: var T) =
-  let
-    start = dec.pos
-    (typ, name) = dec.typeNamePair()
+proc deserialize*(dec: var Decoder, data: var char) =
+  var base = 0u8
+  dec.deserialize(base)
+  data = char(base)
+
+proc deserialize*[T: enum](dec: var Decoder, data: var T) =
+  let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, data, dec.pos)
 
   var base = 0i64
   dec.pos += dec.data.readLeb128(base)
   if base notin T.low.ord..T.high.ord:
-    raise (ref VsbfError)(msg: fmt"Cannot convert to got '{base}', but expected value in '{$T}'. At position: '{dec.pos}'")
+    raise (ref VsbfError)(msg: fmt"Cannot convert '{base}' to '{$T}'. At position: '{dec.pos}'")
 
   data = T(base)
 
 proc deserialize*[T: range](dec: var Decoder, data: var T) =
-  let
-    start = dec.pos
-    (typ, nameInd) = dec.typeNamePair()
-  canConvertFrom(typ, data, dec.pos)
-
   var base = default T.rangeBase()
   dec.deserialize(base)
   if base notin T.low..T.high:
     raise (ref VsbfError)(msg: fmt"Cannot convert to range got '{base}', but expected value in '{$T}'. At position: '{dec.pos}'")
 
+  data = T(base)
+
 proc deserialize*[T](dec: var Decoder, data: var Option[T]) =
   let (typ, nameInd) = dec.typeNamePair()
   canConvertFrom(typ, data, dec.pos)
-  let isOpt = dec.data[0] == 1
+  let isOpt = dec.data[0].bool
   dec.pos += 1
   if isOpt:
     var val = default(T)
@@ -297,19 +297,11 @@ proc deserialize*[T](dec: var Decoder, data: var Option[T]) =
 proc deserialize*(dec: var Decoder, data: var ref) =
   let (typ, nameInd) = dec.typeNamePair()
   canConvertFrom(typ, data, dec.pos)
-  let isRefNil = dec.data[0]
+  let isRefNil = dec.data[0].bool
   dec.pos += 1
   if not isRefNil:
     new data
     dec.deserialize(data[])
 
 proc deserializeRoot*(dec: var Decoder, T: typedesc[object or tuple]): T =
-  let (typ, name) = dec.peekTypeNamePair()
-  canConvertFrom(typ, result, dec.pos)
-  if name != "":
-    raise (ref VsbfError)(
-        msg:
-          "Expected a nameless root, but it was named: " & name
-      )
-
   dec.deserialize(result)
