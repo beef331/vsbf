@@ -4,16 +4,10 @@ import shared
 type
   Encoder*[DataType: SeqOrArr[byte]] = object
     strs: Table[string, int]
-    when DataType is seq[byte]:        ## The string section, contains an array of `(len: leb128, data: UncheckedArray[char])`
+    when DataType is seq[byte]:
       dataBuffer*: seq[byte]
-        ##
-        ## The data section, first value should be the 'entry' and is a `typeId` that determines how all the data is parsed.
-        ## In the future this may be enforced to be a `Struct` or custom type
     else:
       dataBuffer*: UnsafeView[byte]
-        ##
-        ## The data section, first value should be the 'entry' and is a `typeId` that determines how all the data is parsed.
-        ## In the future this may be enforced to be a `Struct` or custom type
       dataPos*: int
 
 template offsetDataBuffer*(encoder: Encoder[openArray[byte]]): untyped =

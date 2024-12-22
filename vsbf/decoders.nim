@@ -234,8 +234,8 @@ proc skipToEndOfStructImpl(dec: var Decoder) =
     inc dec.pos
     if isOpt:
       dec.skipToEndOfStructImpl()
-  else:
-    raise (ref VsbfError)(msg: fmt"Cannot skip over custom types at {dec.pos}")
+  of Reserved:
+    doAssert false, "Should be impossible"
 
 
 proc skipToEndOfStruct(dec: var Decoder) =

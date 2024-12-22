@@ -9,9 +9,7 @@ template vsbfName*(s: string) {.pragma.}
 
 type
   SerialisationType* = enum
-    CustomStart = 0 # 0..99 are reserved custom types
-    CustomEnd = 99
-    Bool = 100 ## Should always be 0 or 1
+    Bool
     Int8
     Int16
     Int32
@@ -34,12 +32,6 @@ type
 
   VsbfError* = object of ValueError
 
-proc `$`*(serType: SerialisationType): string =
-  if serType.ord in 0..99:
-    "Custom" & $serType.ord
-  else:
-    system.`$`(serType)
-
 static:
   assert sizeof(SerialisationType) == 1 # Types are always 1
   assert SerialisationType.high.ord <= 127
@@ -50,13 +42,20 @@ proc encoded*(serType: SerialisationType, storeName: bool): byte =
   else:
     byte(serType)
 
+
 proc decodeType*(data: byte): tuple[typ: SerialisationType, hasName: bool] =
   result.hasName = (0b1000_0000u8 and data) > 0 # Extract whether the lastbit is set
-  result.typ = cast[SerialisationType](data and 0b0111_1111)
+  let val = (data and 0b0111_1111u8)
+  if val notin Bool.uint8..Option.uint8:
+    raise (ref VsbfError)(msg: "Cannot decode value " & $val & " into vsbf type tag")
+
+  {.warning[HoleEnumConv]: off.}
+  result.typ = SerialisationType((data and 0b0111_1111u8))
+  {.warning[HoleEnumConv]: on.}
 
 proc canConvertFrom*(typ: SerialisationType, val: auto, pos: int) =
   mixin vsbfId
-  const expected = typeof(val).vsbfId()
+  var expected = typeof(val).vsbfId()
   if typ != expected:
     raise (ref VsbfError)(msg: "Expected: " & $expected & " but got " & $typ & ". Position: " & $(pos - 1))
 
