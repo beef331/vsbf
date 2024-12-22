@@ -200,6 +200,53 @@ proc deserialize*[T](dec: var Decoder, arr: var seq[T]) =
   for i in 0..<len:
     dec.deserialize(arr[i])
 
+proc skipToEndOfStructImpl(dec: var Decoder) =
+  var (typ, ind) = dec.typeNamePair()
+
+  if ind.isSome:
+    debug "Skipping over field ", dec.strs[ind.get], " with type of ", typ
+
+  case typ
+  of Bool:
+    inc dec.pos
+  of Int8..Int64:
+    var i = 0
+    dec.pos += dec.data.readLeb128(i)
+  of Float32:
+    dec.pos += sizeof(float32)
+  of Float64:
+    dec.pos += sizeof(float64)
+  of String:
+    dec.readString()
+  of Array:
+    var len = 0
+    dec.pos += dec.data.readLeb128(len)
+    debug "Skipping array of size ", len
+    for i in 0..<len:
+      dec.skipToEndOfStructImpl()
+  of Struct:
+    while not(dec.atEnd) and (var (typ, _) = dec.peekTypeNamePair(); typ) != EndStruct:
+      dec.skipToEndOfStructImpl()
+  of EndStruct:
+    discard
+  of Option:
+    let isOpt = dec.data[0].bool
+    inc dec.pos
+    if isOpt:
+      dec.skipToEndOfStructImpl()
+  else:
+    raise (ref VsbfError)(msg: fmt"Cannot skip over custom types at {dec.pos}")
+
+
+proc skipToEndOfStruct(dec: var Decoder) =
+  dec.skipToEndOfStructImpl()
+
+  if (let (typ, _) = dec.peekTypeNamePair(); typ != EndStruct):
+    raise (ref VsbfError)(msg: fmt"Cannot continue skipping over field {dec.pos}")
+
+
+
+
 proc deserialize*[T: object | tuple](dec: var Decoder, obj: var T) =
   mixin deserialize
   var (typ, nameInd) = dec.typeNamePair()
@@ -227,11 +274,12 @@ proc deserialize*[T: object | tuple](dec: var Decoder, obj: var T) =
           found = true
           debug "Deserializing ", astToStr(field), " for ", T
           {.cast(uncheckedAssign).}:
-            deserialize(dec, field)
+            dec.deserialize(field)
           break
 
     if not found:
-      raise (ref VsbfError)(msg: fmt"No field found named '{name}' in '{$T}'")
+      dec.skipToEndOfStruct()
+
   debug "End of struct ", T
   if (let (typ, _) = dec.typeNamePair(); typ) != EndStruct: # Pops the end and ensures it's correct'
     raise (ref VsbfError)(msg: fmt"Invalid struct expected EndStruct at {dec.pos}")
