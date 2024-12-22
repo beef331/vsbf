@@ -39,6 +39,7 @@ proc writeTo*[T](encoder: var Encoder[T], toWrite: openArray[byte]) =
       encoder.offsetDataBuffer()[i] = x
     encoder.dataPos += toWrite.len
 
+proc close*(encoder: sink Encoder): seq[byte] = ensureMove encoder.databuffer
 
 proc init*(
     _: typedesc[Encoder], strsBuffer, dataBuffer: openArray[byte]
