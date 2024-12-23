@@ -5,9 +5,16 @@ A very simple binary format
 ## Specification
 As the name implies it's a simple binary format.
 
-Every file starts with `vsbf` followed by two bytes for the version akin to wasm.
-All integers are encoded using leb128 encoding.
 Every entry is prefixed with a type, the most significant bit of this type id is whether this is a 'field' value.
+All integers are encoded using leb128 encoding.
+
+### Header
+```
+00000000  76 73 62 66 01 00
+```
+
+`76 73 62 66` is `vsbf` which every file requires.
+`01 00` is the version of 1.0 which is also required.
 
 ### Bool
 TypeId - byte
@@ -27,11 +34,9 @@ Example:
 00000000  76 73 62 66 01 00 04 e4 00                       |vsbf.....|
 ```
 
-`76 73 62 66` is `vsbf`.
-`01 00` is the version of 1.0.
 `04` is the typeId with the most significant bit being set to 0.
-This indicates it's an `Int64` typed integer with no name.
-`e4 00` is 100 in leb128 encoding.
+In this case it an `Int64` typed integer with no name.
+`e4 00` is `100` in leb128 encoding.
 
 ### Float32
 TypeId - byte[4]
