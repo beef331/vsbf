@@ -3,7 +3,7 @@
 version       = "0.1.1"
 author        = "Jason"
 description   = "A new awesome nimble package"
-license       = "GPL-3.0-or-later"
+license       = "MIT"
 
 # Dependencies
 
