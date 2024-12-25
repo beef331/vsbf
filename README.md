@@ -136,7 +136,7 @@ In this case it is `04` which is an `Int64` with the value `0`
 
 
 
-#### Dumper
+## Dumper
 
 Along with this package is `vsbfdumper` which will print a vsbf buffer in a human readable format akin to JSON.
 
