@@ -133,3 +133,177 @@ TypeId - byte - ?VSBFEntry
 Following a `01` there must be a valid VSBF tag and entry.
 
 In this case it is `04` which is an `Int64` with the value `0`
+
+
+
+#### Dumper
+
+Along with this package is `vsbfdumper` which will print a vsbf buffer in a human readable format akin to JSON.
+
+
+Using the following Nim object
+
+```nim
+
+type
+  MyObject = object
+    x, y: int
+    name: string
+    age: int
+    talents: array[6, string]
+    children: seq[MyObject]
+    pets: seq[string]
+    letters: set[range['a'..'z']]
+    dontSave {.skipSerialization.}: ref int
+
+var
+  obj =
+    MyObject(
+      x: 100,
+      y: 0,
+      age: 42,
+      name: "Jimbo",
+      talents: ["Jumping", "Running", "", "", "pets", "age"],
+      pets: @["Sam", "Diesel"],
+      letters: {'a'..'z'},
+      children: newSeq[MyObject](5),
+      dontSave: new int
+    )
+
+```
+
+encoded will generate a raw VSBF of
+
+```
+00000000  76 73 62 66 01 00 09 84  00 01 78 e4 00 84 01 01  |vsbf......x.....|
+00000010  79 00 87 02 04 6e 61 6d  65 03 05 4a 69 6d 62 6f  |y....name..Jimbo|
+00000020  84 04 03 61 67 65 2a 88  05 07 74 61 6c 65 6e 74  |...age*...talent|
+00000030  73 06 07 06 07 4a 75 6d  70 69 6e 67 07 07 07 52  |s....Jumping...R|
+00000040  75 6e 6e 69 6e 67 07 08  00 07 08 07 09 04 70 65  |unning........pe|
+00000050  74 73 07 04 88 0a 08 63  68 69 6c 64 72 65 6e 05  |ts.....children.|
+00000060  09 84 00 00 84 01 00 87  02 08 84 04 00 88 05 06  |................|
+00000070  07 08 07 08 07 08 07 08  07 08 07 08 88 0a 00 88  |................|
+00000080  09 00 83 0b 07 6c 65 74  74 65 72 73 00 0a 09 84  |.....letters....|
+00000090  00 00 84 01 00 87 02 08  84 04 00 88 05 06 07 08  |................|
+000000a0  07 08 07 08 07 08 07 08  07 08 88 0a 00 88 09 00  |................|
+000000b0  83 0b 00 0a 09 84 00 00  84 01 00 87 02 08 84 04  |................|
+000000c0  00 88 05 06 07 08 07 08  07 08 07 08 07 08 07 08  |................|
+000000d0  88 0a 00 88 09 00 83 0b  00 0a 09 84 00 00 84 01  |................|
+000000e0  00 87 02 08 84 04 00 88  05 06 07 08 07 08 07 08  |................|
+000000f0  07 08 07 08 07 08 88 0a  00 88 09 00 83 0b 00 0a  |................|
+00000100  09 84 00 00 84 01 00 87  02 08 84 04 00 88 05 06  |................|
+00000110  07 08 07 08 07 08 07 08  07 08 07 08 88 0a 00 88  |................|
+00000120  09 00 83 0b 00 0a 88 09  02 07 0c 03 53 61 6d 07  |............Sam.|
+00000130  0d 06 44 69 65 73 65 6c  83 0b ff ff ff 1f 0a     |..Diesel.......|
+```
+
+using `vsbfdumper` on this emits the following:
+
+
+```
+Struct
+   Int64 x: 100
+   Int64 y: 0
+   String name: "Jimbo"
+   Int64 age: 42
+   Array talents: [
+        "Jumping"
+        "Running"
+        ""
+        ""
+        "pets"
+        "age"
+   ]
+   Array children: [
+        Struct
+           Int64 x: 0
+           Int64 y: 0
+           String name: ""
+           Int64 age: 0
+           Array talents: [
+                ""
+                ""
+                ""
+                ""
+                ""
+                ""
+           ]
+           Array children: []
+           Array pets: []
+           Int32 letters: 0
+
+        Struct
+           Int64 x: 0
+           Int64 y: 0
+           String name: ""
+           Int64 age: 0
+           Array talents: [
+                ""
+                ""
+                ""
+                ""
+                ""
+                ""
+           ]
+           Array children: []
+           Array pets: []
+           Int32 letters: 0
+
+        Struct
+           Int64 x: 0
+           Int64 y: 0
+           String name: ""
+           Int64 age: 0
+           Array talents: [
+                ""
+                ""
+                ""
+                ""
+                ""
+                ""
+           ]
+           Array children: []
+           Array pets: []
+           Int32 letters: 0
+
+        Struct
+           Int64 x: 0
+           Int64 y: 0
+           String name: ""
+           Int64 age: 0
+           Array talents: [
+                ""
+                ""
+                ""
+                ""
+                ""
+                ""
+           ]
+           Array children: []
+           Array pets: []
+           Int32 letters: 0
+
+        Struct
+           Int64 x: 0
+           Int64 y: 0
+           String name: ""
+           Int64 age: 0
+           Array talents: [
+                ""
+                ""
+                ""
+                ""
+                ""
+                ""
+           ]
+           Array children: []
+           Array pets: []
+           Int32 letters: 0
+
+   ]
+   Array pets: [
+        "Sam"
+        "Diesel"
+   ]
+   Int32 letters: 67108863
+```
