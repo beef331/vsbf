@@ -1,3 +1,10 @@
+*
+!*.*
+!*/
+*.dll
+*.so
+*.exe
+*.kate-swap
 nimcache/
 nimblecache/
 htmldocs/
