@@ -1,5 +1,5 @@
 # vsbf
-A very simple binary format
+A very simple binary format. Practically a not invented here messagepack!
 
 
 ## Specification
@@ -14,6 +14,7 @@ All integers are encoded using leb128 encoding.
 ```
 
 `76 73 62 66` is `vsbf` which every file requires.
+
 `01 00` is the version of 1.0 which is also required.
 
 ### Bool
@@ -35,7 +36,9 @@ Example:
 ```
 
 `04` is the typeId with the most significant bit being set to 0.
+
 In this case it an `Int64` typed integer with no name.
+
 `e4 00` is `100` in leb128 encoding.
 
 ### Float32
@@ -66,7 +69,9 @@ TypeId - index(leb128) - ?(len(leb128) - char[?])
 ```
 
 `07` indicates `String`.
+
 The index of the string follows the type `00` in this case.
+
 Following that if the string was not already encoded the string data must follow the index.
 
 `05` is the leb128 encoded length of `5`, the raw data `hello` follows that.
@@ -83,7 +88,9 @@ TypeId - len(leb128) - ?entries
 ```
 
 Skipping over the header to `08` one can see an `Array` that has no name.
+
 Following that `03` which is the number of elements this array has (again leb128 encoded).
+
 Finally there are 3 integers ` 04 e4 00 04 c8 01 04 ac 01` which are `Int64 100, Int64 200, Int64 300`.
 
 
@@ -98,11 +105,17 @@ TypeId - ?fields - EndStruct
 
 
 `09` indicates an unamed `Struct` typed block.
+
 `84` is an named `Int64` typed block.
+
 After that the string name index is `00`, as this string has not yet been printed one can see the length and string stored. The value of which is `child`
+
 With further parsing the string `otherChild` will be parsed and stored at index `01`.
+
 Important to note that VSBF only stores the first instance of a string which is why in the final integer `84 00 e4 00` there is no length or string data.
+
 Finally there are two `0a` which are the end struct indication, these are required for navigation over the data without specification of the fields.
+
 In Nim that means this struct can be represented by `((child: 100), otherChild: (child: 100))`.
 
 
@@ -114,6 +127,9 @@ TypeId - byte - ?VSBFEntry
 ```
 
 `0b` indicates an unnamed `Option` block, the next byte indicates whether there is a value.
+
 `01` means there is a value and `00` means there is not one.
+
 Following a `01` there must be a valid VSBF tag and entry.
+
 In this case it is `04` which is an `Int64` with the value `0`
