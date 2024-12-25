@@ -8,3 +8,6 @@ license       = "MIT"
 # Dependencies
 
 requires "nim >= 2.2.0"
+
+
+namedbin = {"vsbf/dumper": "vsbfdumper"}.toTable()
