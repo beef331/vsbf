@@ -15,13 +15,13 @@ proc dumpFloat(dec: var Decoder, kind: SerialisationType, indent: int): string =
   of Float32:
     var val = 0i32
     if not dec.data.read(val):
-      raise (ref VsbfError)(msg: fmt"Could not read a float32 at position {dec.pos}")
+      raise incorrectData("Could not read a float32", dec.pos)
     dec.pos += sizeof(float32)
     $cast[float32](val)
   of Float64:
     var val = 0i64
     if not dec.data.read(val):
-      raise (ref VsbfError)(msg: fmt"Could not read a float64 at position {dec.pos}")
+      raise incorrectData("Could not read a float64.", dec.pos)
     dec.pos += sizeof(float64)
     $cast[float](val)
   else:
@@ -60,7 +60,7 @@ proc dumpDispatch(dec: var Decoder, kind: SerialisationType, indent: int): strin
   of String:
     dec.dumpString(indent + 1)
   else:
-    raise (ref VsbfError)(msg: fmt"Cannot dump type of unknown serialisation. {$kind} At position: {dec.pos}")
+    raise incorrectData(fmt"Cannot dump type of unknown serialisation {$kind}.", dec.pos)
 
 proc dumpStruct(dec: var Decoder, indent: int): string =
   result.add $Struct & "\n"
@@ -86,7 +86,7 @@ proc dumpStruct(dec: var Decoder, indent: int): string =
 
 
   if (let (typ, _) = dec.typeNamePair(); typ) != EndStruct: # Pops the end and ensures it's correct'
-    raise (ref VsbfError)(msg: fmt"Invalid struct expected EndStruct at {dec.pos}")
+    raise incorrectData("Invalid struct expected EndStruct.", dec.pos)
 
 
 proc dumpArray(dec: var Decoder, indent: int): string =
@@ -97,7 +97,7 @@ proc dumpArray(dec: var Decoder, indent: int): string =
     for _ in 0..<len:
       let (typ, nameInd) = dec.typeNamePair()
       if nameInd.isSome:
-        raise (ref VsbfError)(msg: "No name expected for array element, but got one. Position {dec.pos}")
+        raise incorrectData("No name expected for array element, but got one.", dec.pos)
       result.add "\n"
       result.add indented(indent + 1)
       result.add dec.dumpDispatch(typ, indent + 1)

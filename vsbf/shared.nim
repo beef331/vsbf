@@ -1,4 +1,4 @@
-import std/[strutils, options]
+import std/options
 const
   version* = "\1\0"
   header* = ['v', 's', 'b', 'f', version[0], version[1]]
@@ -21,8 +21,7 @@ type
     Struct
     EndStruct # Marks we've finished reading
     Option ## If the next byte is 0x1 you parse the internal otherwise you skip
-    Reserved = 127
-      ## Highest number of builtin types, going past this will cause issues with how name tagging works.
+
 
   SeqOrArr*[T] = seq[T] or openarray[T]
 
@@ -30,11 +29,34 @@ type
     data*: ptr UncheckedArray[T]
     len*: int
 
+  VsbfErrorKind* = enum
+    InsufficientData
+    IncorrectData
+    ExpectedField
+    TypeMismatch
+
+
   VsbfError* = object of ValueError
+    kind*: VsbfErrorKind
+    position*: int = -1
 
 static:
   assert sizeof(SerialisationType) == 1 # Types are always 1
   assert SerialisationType.high.ord <= 127
+
+const VsbfTypes* = {Bool..Option}
+
+proc insufficientData*(msg: string, position: int = -1): ref VsbfError =
+  (ref VsbfError)(kind: InsufficientData, msg: msg, position: position)
+
+proc incorrectData*(msg: string, position: int = -1): ref VsbfError =
+  (ref VsbfError)(kind: IncorrectData, msg: msg, position: position)
+
+proc expectedField*(msg: string, position: int = -1): ref VsbfError =
+  (ref VsbfError)(kind: ExpectedField, msg: msg, position: position)
+
+proc typeMismatch*(msg: string, position: int = -1): ref VsbfError =
+  (ref VsbfError)(kind: TypeMismatch, msg: msg, position: position)
 
 proc encoded*(serType: SerialisationType, storeName: bool): byte =
   if storeName: # las bit reserved for 'hasName'
@@ -43,21 +65,22 @@ proc encoded*(serType: SerialisationType, storeName: bool): byte =
     byte(serType)
 
 
-proc decodeType*(data: byte): tuple[typ: SerialisationType, hasName: bool] =
+{.warning[HoleEnumConv]: off.}
+proc decodeType*(data: byte, pos: int): tuple[typ: SerialisationType, hasName: bool] =
   result.hasName = (0b1000_0000u8 and data) > 0 # Extract whether the lastbit is set
   let val = (data and 0b0111_1111u8)
   if val notin Bool.uint8..Option.uint8:
-    raise (ref VsbfError)(msg: "Cannot decode value " & $val & " into vsbf type tag")
+    raise incorrectData("Cannot decode value " & $val & " into vsbf type tag", pos)
 
-  {.warning[HoleEnumConv]: off.}
+
   result.typ = SerialisationType((data and 0b0111_1111u8))
-  {.warning[HoleEnumConv]: on.}
+{.warning[HoleEnumConv]: on.}
 
 proc canConvertFrom*(typ: SerialisationType, val: auto, pos: int) =
   mixin vsbfId
   var expected = typeof(val).vsbfId()
   if typ != expected:
-    raise (ref VsbfError)(msg: "Expected: " & $expected & " but got " & $typ & ". Position: " & $(pos - 1))
+    raise typeMismatch("Expected: " & $expected & " but got " & $typ, pos)
 
 proc toUnsafeView*[T](oa: openArray[T]): UnsafeView[T] =
   UnsafeView[T](data: cast[ptr UncheckedArray[T]](oa[0].addr), len: oa.len)
@@ -128,7 +151,7 @@ proc readLeb128*[T: SomeUnsignedInt](data: openArray[byte], val: var T): int =
 
   while true:
     if result > data.len:
-      raise (ref VsbfError)(msg: "Attempting to read a too large integer")
+      raise incorrectData("Attempting to read a too large integer")
     let theByte = data[result]
     val = val or (T(0b0111_1111u8 and theByte) shl T(shift))
     inc result
@@ -138,7 +161,7 @@ proc readLeb128*[T: SomeUnsignedInt](data: openArray[byte], val: var T): int =
     shift += 7
 
   if shift > sizeof(T) * 8:
-    raise (ref VsbfError)(msg: "Got incorrect sized integer for given field type.")
+    raise  incorrectData("Got incorrect sized integer for given field type.")
 
 proc readLeb128*[T: SomeSignedInt](data: openArray[byte], val: var T): int =
   var
@@ -157,7 +180,7 @@ proc readLeb128*[T: SomeSignedInt](data: openArray[byte], val: var T): int =
     whileBody()
 
   if shift > sizeof(T) * 8:
-    raise (ref VsbfError)(msg: "Got incorrect sized integer for given field type.")
+    raise incorrectData("Got incorrect sized integer for given field type.")
 
   if (theByte and 0b0100_0000) == 0b0100_0000:
     val = val or (not (T(1)) shl T(shift))

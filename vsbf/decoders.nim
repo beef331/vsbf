@@ -20,6 +20,9 @@ proc len(dec: Decoder): int = dec.stream.len
 proc atEnd*(dec: Decoder): bool = dec.pos >= dec.len
 
 template data*[T](decoder: Decoder[T]): untyped =
+  if decoder.pos >= decoder.stream.len:
+    raise insufficientData("More data expect, but hit end of stream.", decoder.pos)
+
   decoder.stream.toOpenArray(decoder.pos, decoder.stream.len - 1)
 
 proc read*[T: SomeInteger](oa: openArray[byte], res: var T): bool =
@@ -69,7 +72,7 @@ proc typeNamePair*(
   dec.pos += 1
 
   var hasName: bool
-  (result.typ, hasName) = encodedType.decodeType()
+  (result.typ, hasName) = encodedType.decodeType(dec.pos - 1)
 
   if hasName:
     var ind = 0
@@ -88,7 +91,7 @@ proc peekTypeNamePair*(
   ## peek the type and name's string index if it has it
   let encodedType = dec.data[0]
   var hasName: bool
-  (result.typ, hasName) = encodedType.decodeType()
+  (result.typ, hasName) = encodedType.decodeType(dec.pos - 1)
   debug result.typ, " has name: ", hasName
   if hasName:
     var val = 0
@@ -108,7 +111,7 @@ proc peekTypeNamePair*(
       else:
         result.name = dec.strs[val]
     else:
-      raise (ref VsbfError)(msg: "No name following a declaration.")
+      raise  incorrectData("No name following a declaration.", dec.pos)
 
 proc getStr*(dec: Decoder, ind: int): lent string =
   dec.strs[ind]
@@ -116,13 +119,13 @@ proc getStr*(dec: Decoder, ind: int): lent string =
 proc readHeader(dec: var Decoder) =
   var ext = dec.read(array[4, char])
   if ext.isNone or ext.unsafeGet != "vsbf":
-    raise (ref VsbfError)(msg: "Not a VSBF stream, missing the header")
+    raise incorrectData("Not a VSBF stream, missing the header", 0)
   dec.pos += 4
 
   let ver = dec.read(array[2, byte])
 
   if ver.isNone:
-    raise (ref VsbfError)(msg: "Cannot read, missing version")
+    raise incorrectData("Cannot read, missing version", 4)
 
   dec.pos += 2
 
@@ -162,7 +165,7 @@ proc deserialize*(dec: var Decoder, f: var SomeFloat) =
     dec.pos += sizeof(val)
     f = cast[typeof(f)](val)
   else:
-    raise (ref VsbfError)(msg: "Could not read a float")
+    raise incorrectData("Could not read a float", dec.pos)
 
 
 proc deserialize*(dec: var Decoder, str: var string) =
@@ -183,10 +186,10 @@ proc deserialize*[Idx, T](dec: var Decoder, arr: var array[Idx, T]) =
   var len = 0
   dec.pos += dec.data.readLeb128(len)
   if len > arr.len:
-    raise (ref VsbfError)(
-        msg:
-          "Expected an array with a length equal to or less than '" & $arr.len &
-          "', but got length of '" & $len & "'."
+    raise incorrectData(
+        "Expected an array with a length less than or equal to '" & $arr.len &
+        "', but got length of '" & $len & "'.",
+        dec.pos
       )
   for i in 0..<len:
     dec.deserialize(arr[i])
@@ -234,15 +237,13 @@ proc skipToEndOfStructImpl(dec: var Decoder) =
     inc dec.pos
     if isOpt:
       dec.skipToEndOfStructImpl()
-  of Reserved:
-    doAssert false, "Should be impossible"
 
 
 proc skipToEndOfStruct(dec: var Decoder) =
   dec.skipToEndOfStructImpl()
 
   if (let (typ, _) = dec.peekTypeNamePair(); typ != EndStruct):
-    raise (ref VsbfError)(msg: fmt"Cannot continue skipping over field {dec.pos}")
+    raise incorrectData("Cannot continue skipping over field.", dec.pos)
 
 
 
@@ -257,7 +258,7 @@ proc deserialize*[T: object | tuple](dec: var Decoder, obj: var T) =
   while not(dec.atEnd) and (var (typ, name) = dec.peekTypeNamePair(); typ) != EndStruct:
 
     if name == "":
-      raise (ref VsbfError)(msg: "Expected name at: " & $dec.pos)
+      raise incorrectData("Expected field name.", dec.pos)
 
     debug "Deserializing field: ", name
 
@@ -282,7 +283,7 @@ proc deserialize*[T: object | tuple](dec: var Decoder, obj: var T) =
 
   debug "End of struct ", T
   if (let (typ, _) = dec.typeNamePair(); typ) != EndStruct: # Pops the end and ensures it's correct'
-    raise (ref VsbfError)(msg: fmt"Invalid struct expected EndStruct at {dec.pos}")
+    raise incorrectData("Invalid struct expected EndStruct.", dec.pos)
 
 proc deserialize*(dec: var Decoder, data: var (distinct)) =
   dec.deserialize(distinctBase(data))
@@ -316,17 +317,19 @@ proc deserialize*[T: enum](dec: var Decoder, data: var T) =
   canConvertFrom(typ, data, dec.pos)
 
   var base = 0i64
+  let pos = dec.pos
   dec.pos += dec.data.readLeb128(base)
   if base notin T.low.ord..T.high.ord:
-    raise (ref VsbfError)(msg: fmt"Cannot convert '{base}' to '{$T}'. At position: '{dec.pos}'")
+    typeMismatch(msg: fmt"Cannot convert '{base}' to '{$T}'.", pos)
 
   data = T(base)
 
 proc deserialize*[T: range](dec: var Decoder, data: var T) =
   var base = default T.rangeBase()
+  let pos = dec.pos
   dec.deserialize(base)
   if base notin T.low..T.high:
-    raise (ref VsbfError)(msg: fmt"Cannot convert to range got '{base}', but expected value in '{$T}'. At position: '{dec.pos}'")
+    raise typeMismatch(fmt"Cannot convert to range got '{base}', but expected value in '{$T}'.", pos)
 
   data = T(base)
 
