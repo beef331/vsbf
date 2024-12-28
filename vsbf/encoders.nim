@@ -70,20 +70,17 @@ proc serializeTypeInfo[T](encoder: var Encoder, val: T, name: sink string) =
   if name.len > 0:
     encoder.cacheStr(name)
 
-proc serialize*(encoder: var Encoder, i: SomeInteger, name: string) =
+proc serialize*(encoder: var Encoder, i: LebEncodedInt, name: string) =
   serializeTypeInfo(encoder, i, name)
   let (data, len) = leb128 i
   encoder.writeTo data.toOpenArray(0, len - 1)
 
-proc serialize*(encoder: var Encoder, b: bool, name: string) =
-  serializeTypeInfo(encoder, b, name)
-  encoder.writeTo b.byte
+proc serialize*(encoder: var Encoder, val: bool | char | uint8 | int8, name: string) =
+  serializeTypeInfo(encoder, val, name)
+  encoder.writeTo cast[byte](val)
 
 proc serialize*(encoder: var Encoder, i: enum, name: string) =
  encoder.serialize(int64(i), name)
-
-proc serialize*(encoder: var Encoder, ch: char, name: string) =
- encoder.serialize(byte(ch), name)
 
 proc serialize*(encoder: var Encoder, f: SomeFloat, name: string) =
   serializeTypeInfo(encoder, f, name)

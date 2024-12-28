@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.1.2"
+version       = "0.1.3"
 author        = "Jason"
 description   = "A new awesome nimble package"
 license       = "MIT"
@@ -8,6 +8,7 @@ license       = "MIT"
 # Dependencies
 
 requires "nim >= 2.2.0"
+requires "stew >= 0.2.0"
 
 
 namedbin = {"vsbf/dumper": "vsbfdumper"}.toTable()

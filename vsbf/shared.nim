@@ -8,6 +8,8 @@ template skipSerialization*() {.pragma.}
 template vsbfName*(s: string) {.pragma.}
 
 type
+  LebEncodedInt* = SomeInteger and not(int8 | uint8)
+
   SerialisationType* = enum
     Bool
     Int8
@@ -108,33 +110,35 @@ proc write*(sq: var seq[byte], toWrite: SomeInteger): int =
   for offset in 0..<sizeof(toWrite):
     sq.add byte((toWrite shr (offset * 8)) and 0xff)
 
-proc writeLeb128*(buffer: var openArray[byte], i: SomeUnsignedInt): int =
-  var
-    val = ord(i)
-    ranOnce = false
+template doWhile(cond: bool, body: untyped) =
+  body
+  while cond:
+    body
 
-  while val != 0 or not ranOnce:
+proc writeLeb128*(buffer: var openArray[byte], i: SomeUnsignedInt): int =
+  var val = uint64(i)
+  doWhile(val != 0):
     var data = byte(val and 0b0111_1111)
     val = val shr 7
     if val != 0:
       data = 0b1000_0000 or data
     buffer[result] = data
-    ranOnce = true
     inc result
     if result > buffer.len:
-      return -1
+      raise insufficientData("Not enough space to encode an unsigned leb128 integer.")
 
-proc writeLeb128*(buffer: var openArray[byte], i: SomeSignedInt): int =
+proc writeLeb128*[T: SomeSignedInt](buffer: var openArray[byte], i: T): int =
   const size = sizeof(i)
   let isNegative = i < 0
   var
     val = i
     more = true
+
   while more:
     var data = byte(val and 0b0111_1111)
     val = val shr 7
     if isNegative:
-      val = val or (not (0 shl (size - 7)))
+      val = val or (not(T(0)) shl T(size - 7))
 
     let isSignSet = (0x40 and data) != 0
     if (val == 0 and not isSignSet) or (val == -1 and isSignSet):
@@ -144,7 +148,7 @@ proc writeLeb128*(buffer: var openArray[byte], i: SomeSignedInt): int =
     buffer[result] = data
     inc result
     if result > buffer.len:
-      return -1
+      raise insufficientData("Not enough space to encode a signed leb128 integer")
 
 proc readLeb128*[T: SomeUnsignedInt](data: openArray[byte], val: var T): int =
   var shift = 0
@@ -159,9 +163,6 @@ proc readLeb128*[T: SomeUnsignedInt](data: openArray[byte], val: var T): int =
     if (0b1000_0000u8 and theByte) == 0:
       break
     shift += 7
-
-  if shift > sizeof(T) * 8:
-    raise  incorrectData("Got incorrect sized integer for given field type.")
 
 proc readLeb128*[T: SomeSignedInt](data: openArray[byte], val: var T): int =
   var
@@ -178,9 +179,6 @@ proc readLeb128*[T: SomeSignedInt](data: openArray[byte], val: var T): int =
 
   while (0b1000_0000 and theByte) != 0:
     whileBody()
-
-  if shift > sizeof(T) * 8:
-    raise incorrectData("Got incorrect sized integer for given field type.")
 
   if (theByte and 0b0100_0000) == 0b0100_0000:
     val = val or (not (T(1)) shl T(shift))

@@ -148,7 +148,7 @@ proc init*(
   result = Decoder[openArray[byte]](stream: toUnsafeView data)
   result.readHeader()
 
-proc deserialize*(dec: var Decoder, i: var SomeInteger) =
+proc deserialize*(dec: var Decoder, i: var LebEncodedInt) =
   let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, i, dec.pos)
   dec.pos += dec.data.readLeb128(i)
@@ -245,9 +245,6 @@ proc skipToEndOfStruct(dec: var Decoder) =
   if (let (typ, _) = dec.peekTypeNamePair(); typ != EndStruct):
     raise incorrectData("Cannot continue skipping over field.", dec.pos)
 
-
-
-
 proc deserialize*[T: object | tuple](dec: var Decoder, obj: var T) =
   mixin deserialize
   var (typ, nameInd) = dec.typeNamePair()
@@ -301,16 +298,11 @@ proc deserialize*[T](dec: var Decoder, data: var set[T]) =
   else:
     dec.deserialize(cast[ptr array[setSize, byte]](data.addr)[])
 
-proc deserialize*(dec: var Decoder, data: var bool) =
+proc deserialize*[T: bool | char | int8 | uint8](dec: var Decoder, data: var T) =
   let (typ, nameInd) = dec.typeNamePair()
   canConvertFrom(typ, data, dec.pos)
-  data = dec.data[0].bool
+  data = cast[T](dec.data[0])
   inc dec.pos
-
-proc deserialize*(dec: var Decoder, data: var char) =
-  var base = 0u8
-  dec.deserialize(base)
-  data = char(base)
 
 proc deserialize*[T: enum](dec: var Decoder, data: var T) =
   let (typ, _) = dec.typeNamePair()
@@ -320,7 +312,7 @@ proc deserialize*[T: enum](dec: var Decoder, data: var T) =
   let pos = dec.pos
   dec.pos += dec.data.readLeb128(base)
   if base notin T.low.ord..T.high.ord:
-    typeMismatch(msg: fmt"Cannot convert '{base}' to '{$T}'.", pos)
+    raise typeMismatch(fmt"Cannot convert '{base}' to '{$T}'.", pos)
 
   data = T(base)
 
@@ -354,5 +346,5 @@ proc deserialize*(dec: var Decoder, data: var ref) =
     new data
     dec.deserialize(data[])
 
-proc deserializeRoot*(dec: var Decoder, T: typedesc[object or tuple]): T =
+proc deserialize*(dec: var Decoder, T: typedesc): T =
   dec.deserialize(result)

@@ -6,7 +6,7 @@ A very simple binary format. Practically a not invented here messagepack!
 As the name implies it's a simple binary format.
 
 Every entry is prefixed with a type, the most significant bit of this type id is whether this is a 'field' value.
-All integers are encoded using leb128 encoding.
+All non 8 bit integers are encoded using leb128 encoding.
 
 ### Header
 ```
@@ -27,7 +27,7 @@ TypeId - byte
 `00` indicates a `Bool`.
 The following byte is the bool's raw value.
 
-### Int(N)
+### Int16, Int32, Int64
 TypeId - data(leb128)
 
 Example:

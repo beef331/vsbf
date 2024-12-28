@@ -48,7 +48,7 @@ when isMainModule:
 
     var decoder = Decoder.init(theFile)
     obj.dontSave = nil
-    assert decoder.deserializeRoot(MyObject) == obj
+    assert decoder.deserialize(MyObject) == obj
     decoder = Decoder.init(theFile)
     decoder.pos = headerSize
     echo decoder.dump()
@@ -59,7 +59,7 @@ when isMainModule:
     var buffer: array[1024, byte]
     buffer[0..fileData.high] = (fileData.toOpenArrayByte(0, fileData.high))
     var oaDecoder = Decoder.init(buffer)
-    assert oaDecoder.deserializeRoot(MyObject) == obj
+    assert oaDecoder.deserialize(MyObject) == obj
     oaDecoder = Decoder.init(buffer)
     echo oaDecoder.dump()
 
