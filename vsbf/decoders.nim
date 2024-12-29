@@ -106,6 +106,10 @@ proc peekTypeNamePair*(
           strLenBytes = dec.data.toOpenArray(1 + indSize).readLeb128(strLen)
           start = 1 + indSize + strLenBytes
         result.name = newString(strLen)
+
+        if start >= dec.len or start + strLen - 1 > dec.len:
+          raise insufficientData("Need more data for a field", dec.pos)
+
         for i, x in dec.data.toOpenArray(start, start + strLen - 1):
           result.name[i] = char x
       else:

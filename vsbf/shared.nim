@@ -46,7 +46,10 @@ static:
   assert sizeof(SerialisationType) == 1 # Types are always 1
   assert SerialisationType.high.ord <= 127
 
-const VsbfTypes* = {Bool..Option}
+const
+  VsbfTypes* = {Bool..Option}
+  LowerSeven = 0b0111_1111
+  MSBit = 0b1000_0000u8
 
 proc insufficientData*(msg: string, position: int = -1): ref VsbfError =
   (ref VsbfError)(kind: InsufficientData, msg: msg, position: position)
@@ -69,13 +72,13 @@ proc encoded*(serType: SerialisationType, storeName: bool): byte =
 
 {.warning[HoleEnumConv]: off.}
 proc decodeType*(data: byte, pos: int): tuple[typ: SerialisationType, hasName: bool] =
-  result.hasName = (0b1000_0000u8 and data) > 0 # Extract whether the lastbit is set
-  let val = (data and 0b0111_1111u8)
+  result.hasName = (MSBit and data) > 0 # Extract whether the lastbit is set
+  let val = (data and LowerSeven)
   if val notin Bool.uint8..Option.uint8:
     raise incorrectData("Cannot decode value " & $val & " into vsbf type tag", pos)
 
 
-  result.typ = SerialisationType((data and 0b0111_1111u8))
+  result.typ = SerialisationType((data and LowerSeven))
 {.warning[HoleEnumConv]: on.}
 
 proc canConvertFrom*(typ: SerialisationType, val: auto, pos: int) =
@@ -118,10 +121,10 @@ template doWhile(cond: bool, body: untyped) =
 proc writeLeb128*(buffer: var openArray[byte], i: SomeUnsignedInt): int =
   var val = uint64(i)
   doWhile(val != 0):
-    var data = byte(val and 0b0111_1111)
+    var data = byte(val and LowerSeven)
     val = val shr 7
     if val != 0:
-      data = 0b1000_0000 or data
+      data = MSBit or data
     buffer[result] = data
     inc result
     if result > buffer.len:
@@ -135,56 +138,54 @@ proc writeLeb128*[T: SomeSignedInt](buffer: var openArray[byte], i: T): int =
     more = true
 
   while more:
-    var data = byte(val and 0b0111_1111)
+    var data = byte(val and T(LowerSeven))
     val = val shr 7
-    if isNegative:
-      val = val or (not(T(0)) shl T(size - 7))
 
-    let isSignSet = (0x40 and data) != 0
+    let isSignSet = (0x40 and data) == 0x40
     if (val == 0 and not isSignSet) or (val == -1 and isSignSet):
       more = false
     else:
-      data = 0b1000_0000 or data
+      data = MSBit or data
+
     buffer[result] = data
+
     inc result
-    if result > buffer.len:
+    if result > buffer.len and more:
       raise insufficientData("Not enough space to encode a signed leb128 integer")
 
 proc readLeb128*[T: SomeUnsignedInt](data: openArray[byte], val: var T): int =
-  var shift = 0
+  var shift = T(0)
 
   while true:
     if result > data.len:
       raise incorrectData("Attempting to read a too large integer")
     let theByte = data[result]
-    val = val or (T(0b0111_1111u8 and theByte) shl T(shift))
+    val = val or (T(theByte and LowerSeven) shl shift)
     inc result
 
-    if (0b1000_0000u8 and theByte) == 0:
+    if (MSBit and theByte) != MSBit:
       break
     shift += 7
 
 proc readLeb128*[T: SomeSignedInt](data: openArray[byte], val: var T): int =
   var
-    shift = 0
-    theByte: byte
+    shift = T(0)
+    theByte = 0u8
 
-  template whileBody() =
+  while (MSBit and theByte) == MSBit or result == 0:
+    if result > data.len:
+      raise incorrectData("Attempting to read a too large integer")
+
     theByte = data[result]
-    val = val or T(T(0b0111_1111 and theByte) shl T(shift))
+    val = val or (T(theByte and LowerSeven) shl shift)
     shift += 7
     inc result
 
-  whileBody()
+  if (shift < T(sizeof(T) * 8)) and (theByte and 0x40) == 0x40:
+    val = val or (not(T(0)) shl shift)
 
-  while (0b1000_0000 and theByte) != 0:
-    whileBody()
-
-  if (theByte and 0b0100_0000) == 0b0100_0000:
-    val = val or (not (T(1)) shl T(shift))
-
-proc leb128*(i: SomeInteger): (array[10, byte], int) =
-  var data: array[10, byte]
+proc leb128*(i: SomeInteger): (array[16, byte], int) =
+  var data = default array[16, byte]
   let len = data.writeLeb128(i)
   (data, len)
 
