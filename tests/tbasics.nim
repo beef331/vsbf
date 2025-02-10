@@ -46,10 +46,19 @@ type
     a, b: int
     c: string = "hello travellers"
 
-var encoder = Encoder.init()
-encoder.serializeRoot(MyTypeA(a: 100, b: 200))
+  SimpleTypeA = object of Rootobj
+    test: int32 = -1
 
+  SimpleType = object of SimpleTypeA
+    age: int32
+    name: string
+    amogus: int16 = -1
+
+var encoder = Encoder.init()
+encoder.serialize(MyTypeA(a: 100, b: 200), "")
+encoder.serialize(SimpleType(test: 1234, amogus: 5, name: "Test", age: 495), "")
 decoder = Decoder.init(encoder.dataBuffer)
 
 suite "Defaults":
   check decoder.deserialize(MyTypeB) == MyTypeB(a: 100, b: 200)
+  check decoder.deserialize(SimpleType) == SimpleType(test: 1234, amogus: 5, name: "Test", age: 495)
