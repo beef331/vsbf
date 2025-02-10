@@ -37,3 +37,19 @@ check decoder.deserialize(options.Option[int16]) == some int16.high
 check decoder.deserialize(options.Option[int32]) == some int32.high
 check decoder.deserialize(options.Option[int64]) == some int64.high
 check decoder.deserialize(tuple[test: int32, other: int64]) == (int32.low.int32, int64.low.int64)
+
+
+type 
+  MyTypeA = object
+    a, b: int
+  MyTypeB = object
+    a, b: int
+    c: string = "hello travellers"
+
+var encoder = Encoder.init()
+encoder.serializeRoot(MyTypeA(a: 100, b: 200))
+
+decoder = Decoder.init(encoder.dataBuffer)
+
+suite "Defaults":
+  check decoder.deserialize(MyTypeB) == MyTypeB(a: 100, b: 200)

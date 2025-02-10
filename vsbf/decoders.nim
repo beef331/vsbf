@@ -351,4 +351,5 @@ proc deserialize*(dec: var Decoder, data: var ref) =
     dec.deserialize(data[])
 
 proc deserialize*(dec: var Decoder, T: typedesc): T =
+  result = default(T)
   dec.deserialize(result)
