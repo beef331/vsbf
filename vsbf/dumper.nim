@@ -114,12 +114,12 @@ proc dumpOption(dec: var Decoder, indent: int): string =
   if isValNone:
     result.add "None"
   else:
+    result.add "Option "
     let (typ, _) = dec.typeNamePair()
     result.add dec.dumpDispatch(typ, indent)
 
 proc dump*(dec: var Decoder): string =
   let (typ, nameInd) = dec.typeNamePair()
-  assert typ == Struct
   assert nameInd.isNone()
   dec.dumpDispatch(typ, 0)
 

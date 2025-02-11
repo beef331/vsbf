@@ -347,9 +347,9 @@ proc deserialize*[T](dec: var Decoder, data: var Option[T]) =
 proc deserialize*(dec: var Decoder, data: var ref) =
   let (typ, nameInd) = dec.typeNamePair()
   canConvertFrom(typ, data, dec.pos)
-  let isRefNil = dec.data[0].bool
+  let isRef = dec.data[0].bool
   dec.pos += 1
-  if not isRefNil:
+  if isRef:
     new data
     dec.deserialize(data[])
 
