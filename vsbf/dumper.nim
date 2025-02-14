@@ -10,6 +10,11 @@ proc dumpInteger(dec: var Decoder, kind: SerialisationType, indent: int): string
   dec.pos += dec.data.readleb128(val)
   $val
 
+proc dumpByte(dec: var Decoder, kind: SerialisationType, indent: int): string =
+  var val = dec.data[0]
+  inc dec.pos
+  $val
+
 proc dumpFloat(dec: var Decoder, kind: SerialisationType, indent: int): string =
   case kind
   of Float32:
@@ -47,7 +52,9 @@ proc dumpOption(dec: var Decoder, indent: int): string
 
 proc dumpDispatch(dec: var Decoder, kind: SerialisationType, indent: int): string =
   case kind
-  of Bool..Int64:
+  of Bool..Int8:
+    dec.dumpByte(kind, indent + 1)
+  of Int16..Int64:
     dec.dumpInteger(kind, indent + 1)
   of Float32, Float64:
     dec.dumpFloat(kind, indent + 1)
@@ -108,15 +115,15 @@ proc dumpArray(dec: var Decoder, indent: int): string =
     result = "[]"
 
 proc dumpOption(dec: var Decoder, indent: int): string =
-  let isValNone = dec.data[0] == 0
+  let isValSome = bool(dec.data[0])
   inc dec.pos
   result = indented(indent)
-  if isValNone:
-    result.add "None"
-  else:
+  if isValSome:
     result.add "Option "
     let (typ, _) = dec.typeNamePair()
     result.add dec.dumpDispatch(typ, indent)
+  else:
+    result.add "None"
 
 proc dump*(dec: var Decoder): string =
   let (typ, nameInd) = dec.typeNamePair()

@@ -74,7 +74,7 @@ proc encoded*(serType: SerialisationType, storeName: bool): byte =
 proc decodeType*(data: byte, pos: int): tuple[typ: SerialisationType, hasName: bool] =
   result.hasName = (MSBit and data) > 0 # Extract whether the lastbit is set
   let val = (data and LowerSeven)
-  if val notin Bool.uint8..Option.uint8:
+  if val notin 0u8..SerialisationType.high.uint8:
     raise incorrectData("Cannot decode value " & $val & " into vsbf type tag", pos)
 
 
