@@ -35,7 +35,7 @@ proc read*[T: SomeInteger](oa: openArray[byte], res: var T): bool =
   else:
     false
 
-proc read*(frm: openArray[byte], to: var openArray[byte or char]): int =
+proc read*(frm: openArray[byte], to: var openArray[byte | char]): int =
   if to.len > frm.len:
     -1
   else:
@@ -196,7 +196,7 @@ proc deserialize*[Idx, T](dec: var Decoder, arr: var array[Idx, T]) =
         dec.pos
       )
   for i in 0..<len:
-    dec.deserialize(arr[i])
+    dec.deserialize(arr[Idx(Idx.low.ord + i)])
 
 proc deserialize*[T](dec: var Decoder, arr: var seq[T]) =
   let (typ, _) = dec.typeNamePair()
@@ -278,7 +278,6 @@ proc deserialize*[T: object | tuple](dec: var Decoder, obj: var T) =
           found = true
           debug "Deserializing ", astToStr(field), " for ", T
           {.cast(uncheckedAssign).}:
-            reset field
             dec.deserialize(field)
           break
 
@@ -305,8 +304,8 @@ proc deserialize*[T](dec: var Decoder, data: var set[T]) =
   else:
     dec.deserialize(cast[ptr array[setSize, byte]](data.addr)[])
 
-proc deserialize*[T: bool | char | int8 | uint8](dec: var Decoder, data: var T) =
-  let (typ, nameInd) = dec.typeNamePair()
+proc deserialize*[T: bool | char | int8 | uint8 and not range](dec: var Decoder, data: var T) =
+  let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, data, dec.pos)
   data = cast[T](dec.data[0])
   inc dec.pos
@@ -345,7 +344,7 @@ proc deserialize*[T](dec: var Decoder, data: var Option[T]) =
     data = none(T)
 
 proc deserialize*(dec: var Decoder, data: var ref) =
-  let (typ, nameInd) = dec.typeNamePair()
+  let (typ, _) = dec.typeNamePair()
   canConvertFrom(typ, data, dec.pos)
   let isRef = dec.data[0].bool
   dec.pos += 1

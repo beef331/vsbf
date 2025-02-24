@@ -131,8 +131,6 @@ proc writeLeb128*(buffer: var openArray[byte], i: SomeUnsignedInt): int =
       raise insufficientData("Not enough space to encode an unsigned leb128 integer.")
 
 proc writeLeb128*[T: SomeSignedInt](buffer: var openArray[byte], i: T): int =
-  const size = sizeof(i)
-  let isNegative = i < 0
   var
     val = i
     more = true

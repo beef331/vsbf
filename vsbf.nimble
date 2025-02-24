@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.1.8"
+version       = "0.1.9"
 author        = "Jason"
 description   = "A new awesome nimble package"
 license       = "MIT"
@@ -12,3 +12,6 @@ requires "stew >= 0.2.0"
 
 
 namedbin = {"vsbf/dumper": "vsbfdumper"}.toTable()
+
+taskRequires "test", "https://codeberg.org/ElegantBeef/bear >= 0.1.1"
+  
