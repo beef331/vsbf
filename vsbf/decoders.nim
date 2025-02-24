@@ -278,6 +278,7 @@ proc deserialize*[T: object | tuple](dec: var Decoder, obj: var T) =
           found = true
           debug "Deserializing ", astToStr(field), " for ", T
           {.cast(uncheckedAssign).}:
+            reset field
             dec.deserialize(field)
           break
 
