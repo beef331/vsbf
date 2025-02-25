@@ -13,5 +13,5 @@ requires "stew >= 0.2.0"
 
 namedbin = {"vsbf/dumper": "vsbfdumper"}.toTable()
 
-taskRequires "test", "https://codeberg.org/ElegantBeef/bear >= 0.1.2"
+taskRequires "test", "https://codeberg.org/ElegantBeef/bear >= 0.1.3"
   
