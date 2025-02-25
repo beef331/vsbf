@@ -256,7 +256,8 @@ proc deserialize*[T: object | tuple](dec: var Decoder, obj: var T) =
       debug "Deserialising struct: ", dec.strs[nameInd.get]
   canConvertFrom(typ, obj, dec.pos)
 
-  obj = default(T)
+  when compiles(obj = default(T)):
+    obj = default(T)
 
   while not(dec.atEnd) and (var (typ, name) = dec.peekTypeNamePair(); typ) != EndStruct:
 
@@ -278,7 +279,8 @@ proc deserialize*[T: object | tuple](dec: var Decoder, obj: var T) =
           found = true
           debug "Deserializing ", astToStr(field), " for ", T
           {.cast(uncheckedAssign).}:
-            reset field
+            when compiles(reset field):            
+              reset field
             dec.deserialize(field)
           break
 

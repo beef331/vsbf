@@ -61,6 +61,6 @@ encoder.serialize(new int, "")
 decoder = Decoder.init(encoder.dataBuffer)
 
 suite "Defaults":
-  check decoder.deserialize(MyTypeB) == MyTypeB(a: 100, b: 200)
+  check decoder.deserialize(MyTypeB) == MyTypeB(a: 100, b: 200, c: "")
   check decoder.deserialize(SimpleType) == SimpleType(test: 1234, amogus: 5, name: "Test", age: 495)
   check decoder.deserialize(ref int)[] == 0
