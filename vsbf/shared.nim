@@ -1,4 +1,5 @@
 import std/options
+
 const
   version* = "\1\0"
   header* = ['v', 's', 'b', 'f', version[0], version[1]]

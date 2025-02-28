@@ -128,7 +128,7 @@ proc serialize*[T: Option](encoder: var Encoder, data: T, name: string) =
     encoder.serialize(data.unsafeGet, "")
 
 proc serialize*(encoder: var Encoder, data: distinct, name: string) =
-  encoder.serialize(distinctBase(data), "")
+  encoder.serialize(distinctBase(data), name)
 
 proc serialize*[T: range](encoder: var Encoder, data: T, name: string) =
   encoder.serialize((T.rangeBase) data, name)
