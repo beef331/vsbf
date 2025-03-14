@@ -33,10 +33,11 @@ type
     len*: int
 
   VsbfErrorKind* = enum
-    InsufficientData
-    IncorrectData
-    ExpectedField
-    TypeMismatch
+    None ## No error hit
+    InsufficientData ## Not enough data in the buffer
+    IncorrectData ## Expected something else in the buffer
+    ExpectedField ## Expected a field but got something else
+    TypeMismatch ## Expected a specific type but got another
 
 
   VsbfError* = object of ValueError

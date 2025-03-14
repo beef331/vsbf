@@ -36,9 +36,9 @@ proc writeTo*[T](encoder: var Encoder[T], toWrite: openArray[byte]) =
 proc close*(encoder: sink Encoder): seq[byte] = ensureMove encoder.databuffer
 
 proc init*(
-    _: typedesc[Encoder], strsBuffer, dataBuffer: openArray[byte]
-): Encoder =
-  result = Encoder(
+    _: typedesc[Encoder], dataBuffer: openArray[byte]
+): Encoder[openArray[byte]] =
+  Encoder[openArray[byte]](
     dataBuffer: dataBuffer.toUnsafeView(),
   )
 
