@@ -64,3 +64,19 @@ suite "Defaults":
   check decoder.deserialize(MyTypeB) == MyTypeB(a: 100, b: 200, c: "")
   check decoder.deserialize(SimpleType) == SimpleType(test: 1234, amogus: 5, name: "Test", age: 495)
   check decoder.deserialize(ref int)[] == 0
+
+
+type
+  ObjectA = object
+    a: int
+    b: float
+  ObjectB = object
+    b: float
+
+proc skipFields(_: typedesc[ObjectB]): seq[string] = @["a"]
+
+
+encoder = Encoder.init()
+encoder.serialize(ObjectA(a: 100, b: 3.14159), "")
+decoder = Decoder.init(encoder.dataBuffer)
+check decoder.deserialize(ObjectB) == ObjectB(b: 3.14159)

@@ -207,11 +207,13 @@ proc deserialize*[T](dec: var Decoder, arr: var seq[T]) =
   for i in 0..<len:
     dec.deserialize(arr[i])
 
-proc skipToEndOfStructImpl(dec: var Decoder) =
+proc skipToNext(dec: var Decoder) =
   var (typ, ind) = dec.typeNamePair()
 
   if ind.isSome:
     debug "Skipping over field ", dec.strs[ind.get], " with type of ", typ
+  else:
+    debug "No name found for skipping field of typ: ", typ
 
   case typ
   of Bool:
@@ -230,27 +232,29 @@ proc skipToEndOfStructImpl(dec: var Decoder) =
     dec.pos += dec.data.readLeb128(len)
     debug "Skipping array of size ", len
     for i in 0..<len:
-      dec.skipToEndOfStructImpl()
+      dec.skipToNext()
   of Struct:
     while not(dec.atEnd) and (var (typ, _) = dec.peekTypeNamePair(); typ) != EndStruct:
-      dec.skipToEndOfStructImpl()
+      dec.skipToNext()
   of EndStruct:
     discard
   of Option:
     let isOpt = dec.data[0].bool
     inc dec.pos
     if isOpt:
-      dec.skipToEndOfStructImpl()
+      dec.skipToNext()
 
 
 proc skipToEndOfStruct(dec: var Decoder) =
-  dec.skipToEndOfStructImpl()
+  dec.skipToNext()
 
   if (let (typ, _) = dec.peekTypeNamePair(); typ != EndStruct):
     raise incorrectData("Cannot continue skipping over field.", dec.pos)
 
+proc skipFields[T: object | tuple](_: typedesc[T]): seq[string] = @[]
+
 proc deserialize*[T: object | tuple](dec: var Decoder, obj: var T) =
-  mixin deserialize
+  mixin deserialize, skipFields
   var (typ, nameInd) = dec.typeNamePair()
   if nameInd.isSome:
       debug "Deserialising struct: ", dec.strs[nameInd.get]
@@ -267,6 +271,11 @@ proc deserialize*[T: object | tuple](dec: var Decoder, obj: var T) =
     debug "Deserializing field: ", name
 
     var found = false
+
+    if name in T.skipFields():
+      dec.skipToNext()
+      found = true
+
     for fieldName, field in obj.fieldPairs:
       const realName {.used.} =
         when field.hasCustomPragma(vsbfName):
@@ -279,7 +288,7 @@ proc deserialize*[T: object | tuple](dec: var Decoder, obj: var T) =
           found = true
           debug "Deserializing ", astToStr(field), " for ", T
           {.cast(uncheckedAssign).}:
-            when compiles(reset field):            
+            when compiles(reset field):
               reset field
             dec.deserialize(field)
           break

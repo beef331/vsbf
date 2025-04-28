@@ -1,4 +1,5 @@
 import decoders, shared, encoders
+import std/strformat
 import seeya
 
 type
@@ -100,5 +101,103 @@ proc add_double(state: SerializerState, name: openArray[char], f: float64): Vsbf
   ## Adds a double to the buffer with `name`
   returnVsbfError:
     state.encoder.serialize(f, substr(name))
+
+type
+  DecoderState = ref object
+    decoder: Decoder[openArray[byte]]
+
+  DecodedValue = object
+    case kind: SerialisationType
+    of Bool..Int64:
+      i: int
+    of Float32, Float64:
+      f: float
+    of String:
+      str: cstring
+      str_length: int
+    of Array..SerialisationType.high:
+      discard
+
+
+proc new_decoder*(buffer: openArray[byte], decoder: var DecoderState): VsbfErrorKind {.exporter, expose.} =
+  try:
+    decoder = DecoderState(decoder: Decoder.init(buffer))
+    None
+  except VsbfError as e:
+    e.kind
+
+proc delete_decoder*(decoder: DecoderState) {.exporter, expose.} =
+  `=destroy`(decoder)
+
+proc getInt(dec: var Decoder, kind: SerialisationType): DecodedValue =
+  var val: int
+  dec.pos += dec.data.readleb128(val)
+  {.cast(uncheckedAssign).}:
+    return DecodedValue(kind: kind, i: val)
+
+proc getByte(dec: var Decoder, kind: SerialisationType): DecodedValue =
+  let val = int(dec.data[0])
+  inc dec.pos
+  {.cast(uncheckedAssign).}:
+    return DecodedValue(kind: kind, i: val)
+
+proc getFloat(dec: var Decoder, kind: SerialisationType): DecodedValue =
+  case kind
+  of Float32:
+    var val = 0i32
+    if not dec.data.read(val):
+      raise incorrectData("Could not read a float32", dec.pos)
+    dec.pos += sizeof(float32)
+    DecodedValue(kind: Float32, f: cast[float32](val))
+  of Float64:
+    var val = 0i64
+    if not dec.data.read(val):
+      raise incorrectData("Could not read a float64.", dec.pos)
+    dec.pos += sizeof(float64)
+    DecodedValue(kind: Float64, f: cast[float](val))
+  else:
+    doAssert false, "Somehow got into float logic with: " & $kind
+    DecodedValue()
+
+proc getString(dec: var Decoder): DecodedValue=
+  var ind = 0
+  dec.pos += dec.data.readLeb128(ind)
+
+  if ind notin 0..dec.strs.high:
+    # It has not been read into yet
+    dec.readString()
+
+  DecodedValue(kind: String, str: dec.getStr(ind).cstring, str_length: dec.getStr(ind).len)
+
+
+proc getDispatch(dec: var Decoder, kind: SerialisationType): DecodedValue =
+  case kind
+  of Bool..Int8:
+    dec.getByte(kind)
+  of Int16..Int64:
+    dec.getInt(kind)
+  of Float32, Float64:
+    dec.getFloat(kind)
+  of String:
+    dec.getString()
+  of Struct:
+    DecodedValue(kind: Struct)
+  of Array:
+    DecodedValue(kind: Array)
+  of Option:
+    DecodedValue(kind: Option)
+  else:
+    raise incorrectData(fmt"Cannot dump type of unknown serialisation {$kind}.", dec.pos)
+
+
+proc decoder_next*(decoder: DecoderState, val: var DecodedValue): VsbfErrorKind {.exporter, expose.} =
+  try:
+    let (typ, nameInd) = decoder.decoder.typeNamePair()
+    val = decoder.decoder.getDispatch(typ)
+    None
+  except VsbfError as e:
+    e.kind
+
+
 
 makeHeader("libvsbf.h")
