@@ -1,6 +1,7 @@
 import
   pkg/bear,
   vsbf,
+  vsbf/dumper,
   std/[unittest, random]
 
 
@@ -13,10 +14,10 @@ proc main() =
     var encoder = Encoder.init()
     encoder.serialize(a[], "")
     var decoder = Decoder.init(encoder.close())
-    var b = new It
-    decoder.deserialize(b[])
-    test "Compare":
-      check b.fuzzCompare(a)
-
+    try:
+      {.cast(gcSafe).}:
+        echo decoder.dump()
+    except:
+      assert false
 main()
 
