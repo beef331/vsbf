@@ -42,7 +42,7 @@ type
 
   VsbfError* = object of ValueError
     kind*: VsbfErrorKind
-    position*: int = -1
+    position*: int
 
 static:
   assert sizeof(SerialisationType) == 1 # Types are always 1

@@ -143,7 +143,7 @@ proc init*(
   # We now should be sitting right on the root entry's typeId
 
 proc close*(decoder: sink Decoder[seq[byte]]): seq[byte] =
-  ensureMove(decoder.stream)
+  move decoder.stream
 
 proc init*(
     _: typedesc[Decoder], data: openArray[byte]
