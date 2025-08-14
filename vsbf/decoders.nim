@@ -238,7 +238,7 @@ proc skipToNext(dec: var Decoder) =
       dec.skipToNext()
   of EndStruct:
     discard
-  of Option:
+  of shared.Option:
     let isOpt = dec.data[0].bool
     inc dec.pos
     if isOpt:

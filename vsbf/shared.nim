@@ -229,5 +229,5 @@ proc vsbfId*(_: typedesc[ref]): SerialisationType =
 proc vsbfId*(_: typedesc[enum]): SerialisationType =
   Int64
 
-proc vsbfId*(_: typedesc[Option]): SerialisationType =
-  Option
+proc vsbfId*[T](_: typedesc[options.Option[T]]): SerialisationType =
+  shared.Option

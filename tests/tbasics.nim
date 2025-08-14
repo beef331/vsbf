@@ -12,11 +12,11 @@ let data = @(
     Float32.byte & cast[array[4, byte]](float32.high) &
     Float64.byte & cast[array[8, byte]](float64.high) &
     String.byte & leb(0i64) & leb("hello world".len.int64) & "hello world" &
-    Option.byte & 0u8 &
-    Option.byte & 1u8 & Int8.byte & cast[byte](int8.high) &
-    Option.byte & 1u8 & Int16.byte & leb(int16.high) &
-    Option.byte & 1u8 & Int32.byte & leb(int32.high) &
-    Option.byte & 1u8 & Int64.byte & leb(int64.high) &
+    shared.Option.byte & 0u8 &
+    shared.Option.byte & 1u8 & Int8.byte & cast[byte](int8.high) &
+    shared.Option.byte & 1u8 & Int16.byte & leb(int16.high) &
+    shared.Option.byte & 1u8 & Int32.byte & leb(int32.high) &
+    shared.Option.byte & 1u8 & Int64.byte & leb(int64.high) &
     Struct.byte & Int32.encoded(true) & leb(1i64) & leb("test".len.int64) & "test" & leb(int32.low.int64) &
     Int64.encoded(true) & leb(2i64) & leb("other".len.int64) & "other" & leb(int64.low.int64) & EndStruct.byte
 
@@ -44,15 +44,15 @@ type
     a, b: int
   MyTypeB = object
     a, b: int
-    c: string = "hello travellers"
+    c: string
 
   SimpleTypeA = object of Rootobj
-    test: int32 = -1
+    test: int32
 
   SimpleType = object of SimpleTypeA
     age: int32
     name: string
-    amogus: int16 = -1
+    amogus: int16
 
 var encoder = Encoder.init()
 encoder.serialize(MyTypeA(a: 100, b: 200), "")
@@ -60,10 +60,9 @@ encoder.serialize(SimpleType(test: 1234, amogus: 5, name: "Test", age: 495), "")
 encoder.serialize(new int, "")
 decoder = Decoder.init(encoder.dataBuffer)
 
-suite "Defaults":
-  check decoder.deserialize(MyTypeB) == MyTypeB(a: 100, b: 200, c: "")
-  check decoder.deserialize(SimpleType) == SimpleType(test: 1234, amogus: 5, name: "Test", age: 495)
-  check decoder.deserialize(ref int)[] == 0
+check decoder.deserialize(MyTypeB) == MyTypeB(a: 100, b: 200, c: "")
+check decoder.deserialize(SimpleType) == SimpleType(test: 1234, amogus: 5, name: "Test", age: 495)
+check decoder.deserialize(ref int)[] == 0
 
 
 type
