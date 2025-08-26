@@ -207,6 +207,8 @@ proc deserialize*[T](dec: var Decoder, arr: var seq[T]) =
   for i in 0..<len:
     dec.deserialize(arr[i])
 
+proc skipToEndOfStruct(dec: var Decoder)
+
 proc skipToNext(dec: var Decoder) =
   var (typ, ind) = dec.typeNamePair()
 
@@ -216,9 +218,9 @@ proc skipToNext(dec: var Decoder) =
     debug "No name found for skipping field of typ: ", typ
 
   case typ
-  of Bool:
+  of Bool, Int8:
     inc dec.pos
-  of Int8..Int64:
+  of Int16..Int64:
     var i = 0
     dec.pos += dec.data.readLeb128(i)
   of Float32:
@@ -236,6 +238,7 @@ proc skipToNext(dec: var Decoder) =
   of Struct:
     while not(dec.atEnd) and (var (typ, _) = dec.peekTypeNamePair(); typ) != EndStruct:
       dec.skipToNext()
+
   of EndStruct:
     discard
   of Option:
@@ -277,27 +280,32 @@ proc deserialize*[T: object | tuple](dec: var Decoder, obj: var T) =
       found = true
 
     for fieldName, field in obj.fieldPairs:
-      const realName {.used.} =
+      const realName =
         when field.hasCustomPragma(vsbfName):
           field.getCustomPragmaVal(vsbfName)
         else:
           fieldName
 
-      when not field.hasCustomPragma(skipSerialization):
-        if realName == name:
-          found = true
+      if realName == name:
+        found = true
+        when not field.hasCustomPragma(skipSerialization):
           debug "Deserializing ", astToStr(field), " for ", T
           {.cast(uncheckedAssign).}:
             when compiles(reset field):
               reset field
             dec.deserialize(field)
           break
+        else:
+          dec.skipToNext()
+          if typ == Struct and dec.peekTypeNamePair()[0] == EndStruct:
+            dec.skipToNext()
+          break
 
     if not found:
       dec.skipToEndOfStruct()
 
   debug "End of struct ", T
-  if (let (typ, _) = dec.typeNamePair(); typ) != EndStruct: # Pops the end and ensures it's correct'
+  if dec.typeNamePair()[0] != EndStruct: # Pops the end and ensures it's correct'
     raise incorrectData("Invalid struct expected EndStruct.", dec.pos)
 
 proc deserialize*(dec: var Decoder, data: var (distinct)) =
